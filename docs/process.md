@@ -90,7 +90,8 @@
 ## 6. 预算纪律
 
 - 统计口径：模块全部 `.ts` 源码，排除 `*.test.ts` 与 `tests/` 目录；01-07 位于 `src/<module>/`，08/09 位于 `plugins/<name>/`。
-- 统计命令（Git Bash）：`git ls-files 'src/<module>/**/*.ts' 'plugins/<name>/**/*.ts' | grep -v '\.test\.ts$' | xargs wc -l`。
+- 统计命令（Git Bash）：`git ls-files 'src/<module>/**/*.ts' 'src/<module>/*.ts' 'plugins/<name>/**/*.ts' 'plugins/<name>/*.ts' | grep -v '\.test\.ts$' | xargs wc -l`。
+- **口径陷阱（M0 实测）**：git pathspec 的 `**` 只匹配**子目录**下的文件，不会匹配 `src/<module>/*.ts` 这一层——只写 `'src/<module>/**/*.ts'` 会静默漏计模块顶层文件（M0 漏了 contracts.ts / errors.ts / index.ts 共 539 行）。因此每个模块都要**同时**给出 `**` 与单层两个 pattern。
 - 偏差超过预算 ±20% 时，在模块文档"验收标准"下追加一行说明原因。
 - 产品代码总预算：逐模块预算合计 ~11.5k（architecture.md §4，为实际预期值），总体目标 ~10,000 行（允许浮动），**硬上限 20,000 行**，任何情况下不得突破；测试代码不计入。
 

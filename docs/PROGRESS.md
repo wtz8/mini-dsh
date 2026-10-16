@@ -5,11 +5,12 @@
 
 ## 下一步动作（下一个会话从这里开始）
 
-**当前焦点：M0 骨架 · 步骤 ⑦ Commit 待用户确认（⑥ Review 已完成，修复全绿）**
+**当前焦点：M0 已入库，开 01-config 新对话**
 
-- [ ] 用户确认后提交：conventional commits，建议 `feat(skeleton): plugin kernel, composition root and contracts`；提交前展示变更摘要（仓库当前零 commit，`git ls-files` 口径的 LOC 统计在入库后才生效，提交后需复核 1133）
-- [ ] 提交后：设计文档 `00-skeleton.md` 状态改 Baseline → 开 **01-config** 新对话
-- [ ] 01-config 起点：读 AGENT.md → 本文件 → 写 `docs/design/01-config.md`（Draft），内容含 loadConfig/合并/deepFreeze 边界（冻结归属恒定 boot，见 00-skeleton.md §2.3）
+- [x] M0 已提交：`8813692 feat(skeleton): plugin kernel, composition root and contracts`（25 文件 5032 行，文档 + 实现 + 测试一个 commit）；`00-skeleton.md` 状态已改 **Baseline**
+- [ ] 01-config 新对话开场：读 `AGENT.md` → 本文件 → `docs/design/00-skeleton.md`（Baseline，重点 §2.3 Config 与 §4.1 的 deepFreeze 归属）→ 确认状态为 Reviewed 才动工
+- [ ] 01-config 第一件事：写 `docs/design/01-config.md`（Draft），内容含 `loadConfig()` 三层合并（全局 `~/.minidsh/config.json` → 项目 `minidsh.json` → flags）、默认值合并（含 `logLevel` 默认 `'info'`，R4）、**只加载不冻结**（deepFreeze 归属恒定为 boot，见 00-skeleton.md §2.3）
+- [ ] 01 交付时注册 builtin 用 `registerBuiltin()`（经 `src/index.ts` 导出，返回退订句柄），不要深引用 `src/plugin/boot.ts`
 
 **M0 交付实况（2026-10-16）**：typecheck / lint / test 全绿（44 单测 + 4 集成 = 48 例）；`src/` 实绩 **1133 行**（预算 ~1.2k ±20% 内）；关键文件 `src/contracts.ts`（480）、`src/plugin/boot.ts`（254）、`src/plugin/containers.ts`（161）、`src/plugin/event-bus.ts`（92）、`src/plugin/logger.ts`（56）、`src/plugin/ctx.ts`（42）、`src/errors.ts`（42）、`src/index.ts`（17）；工程脚手架（package.json / tsconfig / eslint.config.js / vitest.config.ts）一并就位。
 
@@ -40,8 +41,8 @@
 | 文档 | 版本/状态 | 说明 |
 |---|---|---|
 | `docs/architecture.md` | 0.1.3 · Reviewed | 2026-10-16 所有者拍板 Q1–Q6，开放问题已全部关闭 |
-| `docs/process.md` | Reviewed | 流程规范（含集成测试步骤与交接跟踪）；2026-10-16 文件头状态与 PROGRESS.md 统一为 Reviewed |
-| `docs/design/00-skeleton.md` | **Reviewed** · 2026-10-16 | M0 设计；评审补齐 5 处硬缺口（事件类型表、import 路径解析、Ctx.sessions 声明类型、WeakMap 挂载序、错误类落点），R1–R4 拍板见 §8 决议表；二次评审补 4 处澄清（deepFreeze 归属恒定 boot、factory 失败路径、SessionEvent 变体集合对 03 封闭、重复 boot 未定义），见 §8 末段；**实现已完成（③④⑤ 全绿），偏离记录 X1–X6 已补记 §7**；首轮代码 review 的 2 个真 bug 与 6 项改进已修复并回写 §4.1/§4.2/§5/§6/§7，**待用户确认 commit 后改 Baseline** |
+| `docs/process.md` | Reviewed | 流程规范（含集成测试步骤与交接跟踪）；2026-10-16 文件头状态与 PROGRESS.md 统一为 Reviewed；M0 提交后修正 §6 的 LOC 统计口径（git pathspec 的 `**` 不匹配目录顶层文件，须并列单层 pattern，见下"口径陷阱"） |
+| `docs/design/00-skeleton.md` | **Baseline** · 2026-10-16 | M0 设计；评审补齐 5 处硬缺口（事件类型表、import 路径解析、Ctx.sessions 声明类型、WeakMap 挂载序、错误类落点），R1–R4 拍板见 §8 决议表；二次评审补 4 处澄清（deepFreeze 归属恒定 boot、factory 失败路径、SessionEvent 变体集合对 03 封闭、重复 boot 未定义），见 §8 末段；**实现已完成（③④⑤ 全绿），偏离记录 X1–X6 已补记 §7**；首轮代码 review 的 2 个真 bug 与 6 项改进已修复并回写 §4.1/§4.2/§5/§6/§7，**待用户确认 commit 后改 Baseline** |
 
 ## 遗留与阻塞
 
@@ -53,6 +54,12 @@
 | R4 | `Config` 增加可选 `logLevel`（默认 'info'），默认值合并归 01 | **已拍板** | M0 §2.3 → 01 |
 | — | M0 内置插件表为空表，`builtin:llm` 等随 02–06 模块注册进表 | 已定 | 各模块 |
 | — | 架构层未定义类型的留白已在 `00-skeleton.md` §2 补齐 | 已定 | M0 |
+
+## 遗留与阻塞（补充）
+
+| # | 事项 | 状态 | 归属 |
+|---|---|---|---|
+| — | LOC 统计口径陷阱：`git ls-files 'src/<m>/**/*.ts'` 漏计目录顶层文件（M0 实测漏 539 行） | **已修**（process.md §6 / 00-skeleton.md §7 已并列单层 pattern） | 01 起每个模块统计时按新命令执行 |
 
 ## 约定备忘（跨会话不变）
 

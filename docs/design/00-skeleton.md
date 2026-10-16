@@ -1,6 +1,6 @@
 # M0 骨架设计
 
-> 状态：Reviewed（2026-10-16 所有者接受评审意见，R1–R4 已拍板，见 §8 决议表）
+> 状态：**Baseline**（2026-10-16 所有者接受评审意见、R1–R4 已拍板并 review 通过代码，见 §8 决议表与本文件 §7 DoD）
 > 预算：~1.2k 行（src/contracts.ts + src/errors.ts + src/plugin/ + src/index.ts，不含测试）
 > 上游依赖：architecture.md 0.1.3（Reviewed）；process.md（Reviewed）
 > 交付物：契约类型 + 插件内核 + 组合根 + 公共 API 出口 + 冒烟测试，完成标准见 architecture.md §9
@@ -268,10 +268,10 @@ boot({ ...最小 config, plugins: [{ source: '<toy 文件路径>' }] })
 - [x] `src/contracts.ts` 覆盖骨架设计 §5 全部类型（含 `NotificationMap` / `WaterfallMap`），无 `any` 逃逸（strict: true）；运行时值仅存于 `src/errors.ts`
 - [x] §6.1 单元测试点全部有对应用例且通过（`src/plugin/` 四个测试文件，44 例：EventBus 8 / 容器 14 / boot 14 / Logger 8）
 - [x] §6.2 集成测试点全部有对应用例且通过（`tests/integration/skeleton.test.ts`，4 条链路）
-- [x] LOC ≤ ~1.2k ±20%（`git ls-files 'src/**/*.ts' | grep -v '\.test\.ts$' | xargs wc -l`）。**M0 统计口径为全部 `src/`**（contracts.ts / errors.ts / index.ts 均属 M0 预算，此口径与 process.md §6 的模块级口径在 M0 等价）；01 起恢复模块级口径。**实绩 1133 行**（在 960–1440 区间内；较首版 1053 增加 registerBuiltin 出口、插件形状校验、X5 清理语义与 JSDoc）
+- [x] LOC ≤ ~1.2k ±20%（`git ls-files 'src/**/*.ts' 'src/*.ts' | grep -v '\.test\.ts$' | xargs wc -l`）。**M0 统计口径为全部 `src/`**（contracts.ts / errors.ts / index.ts 均属 M0 预算，此口径与 process.md §6 的模块级口径在 M0 等价）；01 起恢复模块级口径。**实绩 1133 行**（在 960–1440 区间内；较首版 1053 增加 registerBuiltin 出口、插件形状校验、X5 清理语义与 JSDoc）
 - [x] `docs/PROGRESS.md` 已更新（M0 步骤打勾、LOC 实绩、01-config 的下一步动作）
 - [x] 所有者 review 代码通过（2026-10-16 首轮 review：2 个真 bug + 6 项改进，已全部修复并回写 §4/§5/§6/§7，新增偏离 X5–X6）
-- [ ] 文档状态更新为 Baseline 并按 process.md §5 提交
+- [x] 文档状态更新为 Baseline，并按 process.md §5 提交（`feat(skeleton): ...`，含文档 + 实现 + 测试）
 
 ### 偏离记录（实现时补记，2026-10-16；均不改任何契约签名）
 

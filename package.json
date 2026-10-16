@@ -1,0 +1,28 @@
+{
+  "name": "mini-dsh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "deepseek-harness 的架构级迷你复刻：插件内核 + agent 骨架，零运行时依赖",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "build": "tsc"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/node": "^22.13.0",
+    "eslint": "^9.20.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.0"
+  }
+}

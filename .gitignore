@@ -1,0 +1,14 @@
+# 依赖与产物
+node_modules/
+dist/
+coverage/
+
+# 测试期临时 fixture（tests/integration/fixtures/ 随测试生成与清理）
+tests/integration/fixtures/
+
+# M0 单测的 cwd 解析临时目录
+.tmp-*/
+
+# 编辑器
+.idea/
+.vscode/

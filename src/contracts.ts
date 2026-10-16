@@ -338,7 +338,11 @@ export interface ToolRegistry {
 export interface PromptRegistry {
   /** 注册 prompt section；同 id 重复注册抛错（转 BootError）。 */
   section(s: PromptSection): void
-  /** 按 order 升序、同 order 按 id 字典序拼装全部 section，分隔符 `\n\n`。系统提示唯一出口。 */
+  /**
+   * 按 order 升序、同 order 按 id 字典序拼装全部 section，分隔符 `\n\n`。系统提示唯一出口。
+   * 每次调用都重新排序（O(n log n)）：架构 §6 中每 step 调一次是预期用法，
+   * 调用方勿在热循环内高频调用。
+   */
   render(): string
 }
 
@@ -447,7 +451,20 @@ export interface Plugin {
    * 抛错 = 启动失败（fail-fast，组合根清理已挂载插件后抛 BootError）。
    */
   setup(ctx: Ctx, config?: unknown): void | Promise<void>
-  /** 仅进程退出时调用（逆序）；无热卸载（对照原版的砍点，见架构 §10）。 */
+  /**
+   * 卸载钩子：进程退出（07 的退出流程）或 boot 失败清理时调用（逆序）。
+   *
+   * **必须容忍 setup 未完成**：boot 失败清理会 dispose "setup 中途抛错"的插件
+   * （设计 §5 / X5），此时本插件的 setup 可能一行都没跑完。因此 dispose 内不得
+   * 假设 setup 已经成功——对 setup 里才创建的资源一律用可选链
+   * （`handle?.close()` 而非 `handle!.close()`）。
+   *
+   * 抛错只记 `log.error`，不影响其余插件的 dispose，也不掩盖正在上抛的 BootError。
+   * 仅进程退出时调用；无热卸载（对照原版的砍点，见架构 §10）。
+   *
+   * **不设超时**：内核不中断挂起的 dispose（设计 §5），由 07 的退出流程自行兜底
+   * （`Promise.race` + 强制退出），否则单个卡住的 dispose 会让 `shutdown` 永不返回。
+   */
   dispose?(): void | Promise<void>
 }
 

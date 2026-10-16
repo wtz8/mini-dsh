@@ -81,7 +81,7 @@ interface WaterfallMap {
 }
 ```
 
-**运行时值的落点**（contracts.ts 保持纯类型模块）：`ToolRejected`（pre-execute 否决专用异常，05 的 pipeline 捕获后转 `permission_denied` 结果）与 `BootError`（见 §4.1，携带 `mounted: string[]`）定义在 `src/errors.ts`。骨架设计未指定错误类的文件归属，此为澄清而非偏离。
+**运行时值的落点**（contracts.ts 保持纯类型模块）：`ToolRejected`（pre-execute 否决专用异常，05 的 pipeline 捕获后转 `permission_denied` 结果）与 `BootError`（见 §4.1，携带 `mounted: readonly string[]`，X7）定义在 `src/errors.ts`。骨架设计未指定错误类的文件归属，此为澄清而非偏离。
 
 ### 2.2 Session 词汇（枚举 M0 定，字段细节 03 细化）
 
@@ -189,7 +189,7 @@ boot(config): Promise<Ctx>
  6. 返回 ctx
 ```
 
-`BootError extends Error`，携带 `mounted: string[]`（已成功挂载的插件名）——07 CLI 负责打印名单与退出码 1；M0 冒烟测试断言其抛出与名单内容。boot 失败路径的清理即 R3 决议：**挂载失败不是"无副作用"的**——09 的 MCP 插件可能在 setup 中拉起 stdio 子进程，Windows 下父进程退出不保证子进程终止，因此失败前必须逆序 dispose 已挂载插件（dispose 抛错只记 log，不掩盖 BootError）。
+`BootError extends Error`，携带 `mounted: readonly string[]`（已成功挂载的插件名；数组内容亦只读，X7）——07 CLI 负责打印名单与退出码 1；M0 冒烟测试断言其抛出与名单内容。boot 失败路径的清理即 R3 决议：**挂载失败不是"无副作用"的**——09 的 MCP 插件可能在 setup 中拉起 stdio 子进程，Windows 下父进程退出不保证子进程终止，因此失败前必须逆序 dispose 已挂载插件（dispose 抛错只记 log，不掩盖 BootError）。
 
 ### 4.2 shutdown() 时序
 
@@ -202,6 +202,11 @@ shutdown(ctx): Promise<void>
 ```
 
 `shutdown` 语义服务两个调用方：正常退出（07 CLI 在退出流程调用）与 boot 失败清理（§4.1 步骤 d 复用同一流程）。**幂等**（X5）：07 的退出路径与信号路径可能各调一次，清空挂载序保证不会二次 dispose。
+
+**插件 `dispose` 的两条约定**（X5 派生的义务，已写入 `contracts.ts` 的 `Plugin.dispose` JSDoc）：
+
+1. **必须容忍 setup 未完成**：boot 失败清理会 dispose "setup 中途抛错"的插件（X5），此时该插件的 setup 可能一行都没跑完。因此 dispose 内不得假设 setup 已成功——对 setup 里才创建的资源一律用可选链（`handle?.close()` 而非 `handle!.close()`）。抛错只记 log，不影响其余插件与 BootError 上抛。
+2. **不设超时**：内核不中断挂起的 dispose，因此单个永不 resolve 的 dispose 会让 `shutdown` **永不返回**（实测确认）。超时与强制退出由 07 的退出流程兜底（`Promise.race` + 强制 exit），内核保持零策略——与 §5 "setup 不设超时"的既有决议一致。
 
 ### 4.3 冒烟链路（测试视角）
 
@@ -231,6 +236,9 @@ boot({ ...最小 config, plugins: [{ source: '<toy 文件路径>' }] })
 | `SessionStoreContainer.mount` 第二次调用 | 抛错（一次性注入） |
 | 通知事件监听器抛错 | 吞掉 + `log.error`，`emit` 永不抛 |
 | 瀑布监听器抛错 | 上抛给 `waterfall` 调用方（否决语义） |
+| 瀑布监听器返回非对象（`undefined` / `null` / `false` / `0` / `''`） | **保持原载荷**——只有返回同构对象才替换。仅排除 `undefined` 会让 `return false` 之类的手误把载荷浇成 `false`，且因存储侧类型擦除而静默通过编译 |
+| `dispose` 在 setup 未完成时被调用（boot 失败清理的半失败者，X5） | 正常调用：`dispose` **必须容忍 setup 未完成**（§4.2 约定 1）；抛错只记 log，不影响其余插件与 BootError 上抛 |
+| `dispose` 挂起（Promise 永不 resolve） | **内核不设超时**，`shutdown` 会一直等待（实测：单个挂起的 dispose 使其永不返回）。超时与强制退出归 07 的退出流程（`Promise.race` + 强制 exit），内核保持零策略（§4.2 约定 2） |
 | `dispose` 抛错 | 记 log，继续逆序执行 |
 | config 被插件尝试修改 | `deepFreeze` 后写入在 strict 模式下抛 `TypeError`（含 `plugins[].config`，插件不得修改自身实例配置） |
 | boot 失败清理中 dispose 抛错 | 记 log，继续逆序执行；不掩盖 BootError 的上抛 |
@@ -240,13 +248,13 @@ boot({ ...最小 config, plugins: [{ source: '<toy 文件路径>' }] })
 
 ### 6.1 单元测试（`src/plugin/*.test.ts`）
 
-**EventBus**：通知按注册序派发与退订；监听器抛错被吞并记 log、后续监听器仍执行；瀑布串行顺序、返回对象替换载荷、返回 `undefined` 保持载荷、抛错上抛。
+**EventBus**：通知按注册序派发与退订；监听器抛错被吞并记 log、后续监听器仍执行；瀑布串行顺序、返回对象替换载荷、返回 `undefined` **及任何非对象值**（`null` / `false` / `0` / `''`）保持载荷、抛错上抛。
 
 **容器**：四类 registry 的注册/查重/未挂载解析抛错；`PromptRegistry.render` 的 order 与同序 id 排序、分隔符拼接；SessionStoreContainer 未 mount 抛错 → mount 后委托 → 二次 mount 抛错。
 
 **boot**：按数组顺序挂载（以 plugin/mounted 序断言）；`entry.config` 正确传入 setup 第二参；setup 抛错时先逆序 dispose 再抛 BootError（名单剔除半失败者、半失败者自身仍被 dispose、后续插件不执行）；builtin 未命中、路径 import 失败、default 导出不是函数、`factory()` 抛错、**`factory()` 返回非插件**五类 BootError（后三类同样先清理再上抛）；`registerBuiltin` 重复注册抛错、退订后 builtin 名不再命中；插件路径按 **cwd** 解析（非 boot.ts 所在目录）；config 冻结（改写抛 TypeError，含 `plugins[].config`）。
 
-**shutdown**：逆序调用 dispose；缺 dispose 的插件跳过；dispose 抛错不影响后续；**重复调用幂等**（第二轮无新增 dispose）。
+**shutdown**：逆序调用 dispose；缺 dispose 的插件跳过；dispose 抛错不影响后续；**重复调用幂等**（第二轮无新增 dispose）；**半失败者的 dispose 也被调用**（X5）。
 
 **Logger**：级别过滤（低于阈值静默、默认 info、非法级别兜底 info）、输出到 stderr、格式 `[级别] 消息 [meta...]`、meta 序列化（字符串原样 / 对象 JSON / 多个空格连接）、`Error` meta 输出 stack 而非 `{}`、循环引用 meta 不炸且退化为 `String()`。
 
@@ -266,11 +274,11 @@ boot({ ...最小 config, plugins: [{ source: '<toy 文件路径>' }] })
 - [x] 本文档状态 Reviewed，实现未偏离（差异仅限 §2.4 D1–D5 且已获同意；实现期小偏离见下方"偏离记录"，均不触碰契约签名）
 - [x] `pnpm typecheck`、`pnpm lint`、`pnpm test` 全部通过（package.json / tsconfig / eslint flat config / vitest.config 在 M0 一并就位）
 - [x] `src/contracts.ts` 覆盖骨架设计 §5 全部类型（含 `NotificationMap` / `WaterfallMap`），无 `any` 逃逸（strict: true）；运行时值仅存于 `src/errors.ts`
-- [x] §6.1 单元测试点全部有对应用例且通过（`src/plugin/` 四个测试文件，44 例：EventBus 8 / 容器 14 / boot 14 / Logger 8）
+- [x] §6.1 单元测试点全部有对应用例且通过（`src/plugin/` 四个测试文件，45 例：EventBus 9 / 容器 14 / boot 14 / Logger 8）
 - [x] §6.2 集成测试点全部有对应用例且通过（`tests/integration/skeleton.test.ts`，4 条链路）
-- [x] LOC ≤ ~1.2k ±20%（`git ls-files 'src/**/*.ts' 'src/*.ts' | grep -v '\.test\.ts$' | xargs wc -l`）。**M0 统计口径为全部 `src/`**（contracts.ts / errors.ts / index.ts 均属 M0 预算，此口径与 process.md §6 的模块级口径在 M0 等价）；01 起恢复模块级口径。**实绩 1133 行**（在 960–1440 区间内；较首版 1053 增加 registerBuiltin 出口、插件形状校验、X5 清理语义与 JSDoc）
+- [x] LOC ≤ ~1.2k ±20%（`git ls-files 'src/**/*.ts' 'src/*.ts' | grep -v '\.test\.ts$' | xargs wc -l`）。**M0 统计口径为全部 `src/`**（contracts.ts / errors.ts / index.ts 均属 M0 预算，此口径与 process.md §6 的模块级口径在 M0 等价）；01 起恢复模块级口径。**实绩 1157 行**（在 960–1440 区间内；较首版 1053 增加 registerBuiltin 出口、插件形状校验、X5 清理语义与契约 JSDoc）
 - [x] `docs/PROGRESS.md` 已更新（M0 步骤打勾、LOC 实绩、01-config 的下一步动作）
-- [x] 所有者 review 代码通过（2026-10-16 首轮 review：2 个真 bug + 6 项改进，已全部修复并回写 §4/§5/§6/§7，新增偏离 X5–X6）
+- [x] 所有者 review 代码通过（2026-10-16 两轮：首轮 2 个真 bug + 6 项改进；第二轮针对修复后新语义，补 dispose 的两条约定（§4.2）+ 瀑布载荷只认对象 + `BootError.mounted` 只读数组，均已回写 §4.2/§5/§6.1/§7，新增偏离 X5–X6）
 - [x] 文档状态更新为 Baseline，并按 process.md §5 提交（`feat(skeleton): ...`，含文档 + 实现 + 测试）
 
 ### 偏离记录（实现时补记，2026-10-16；均不改任何契约签名）
@@ -281,8 +289,9 @@ boot({ ...最小 config, plugins: [{ source: '<toy 文件路径>' }] })
 | X2 | `SessionStoreContainer` 的 Promise 返回方法（create/open/list/append）以 `async` 包装，未挂载时以 **Promise rejection** 呈现 `'not mounted'` | 服务面签名是 Promise 契约，同步异常会让"在 async 上下文外直接调用"的场景绕过 `await` 的统一错误路径；subscribe 保持同步抛 |
 | X3 | lint 链路在 eslint flat config 基础上引入 `typescript-eslint` 与 `@eslint/js` 两个配套 devDependency | 架构 §2 只列了 `eslint`；flat config 对 `.ts` 文件的解析与规则需要 TS parser，属 lint 门禁的必需配套而非新运行时依赖（dependencies 仍为空） |
 | X4 | `tsconfig` include 覆盖 `src/` 与 `tests/`（typecheck 门禁覆盖测试代码），故 `tsc` 构建产物为 `dist/src/index.js`，`package.json` 的 `main` 按此设置 | M0 不交付 bin（`mdsh` 归 07）；07 交付时再调整 rootDir / bin 布局 |
-| X5 | 挂载序在 `setup` **之前**追加插件，故 `shutdown` 会 dispose "setup 未成功"的插件；`BootError.mounted` 名单剔除末位半失败者。同时 `shutdown` 结束后清空挂载序，使其幂等 | 两处都是 R3 决议的补强：①半失败者可能已在 setup 中拉起外部资源（09 MCP 的 stdio 子进程正是 R3 的立论场景），只清理"之前成功的"会漏掉它；②07 的退出路径与信号路径可能各调一次 shutdown，不幂等就会二次 dispose。`mounted` 名单语义仍是"已成功挂载"，未变 |
+| X5 | 挂载序在 `setup` **之前**追加插件，故 `shutdown` 会 dispose "setup 未成功"的插件；`BootError.mounted` 名单剔除末位半失败者。同时 `shutdown` 结束后清空挂载序，使其幂等。**派生义务**：插件 `dispose` 必须容忍 setup 未完成（§4.2 约定 1，已写入 `contracts.ts` 的 JSDoc） | 两处都是 R3 决议的补强：①半失败者可能已在 setup 中拉起外部资源（09 MCP 的 stdio 子进程正是 R3 的立论场景），只清理"之前成功的"会漏掉它；②07 的退出路径与信号路径可能各调一次 shutdown，不幂等就会二次 dispose。`mounted` 名单语义仍是"已成功挂载"，未变 |
 | X6 | builtin 插件表（Map）改为 `boot.ts` 模块级**私有**状态，新增导出 `registerBuiltin(name, factory): Unsubscribe` 作为唯一注册入口，并经 `src/index.ts` 转发 | 原实现导出裸 Map，02–09 注册内置插件只能深引用 `src/plugin/boot.js`，与 §1"不深引用内部路径"自相矛盾；出口改为函数后可查重、可退订，内置模块不再触碰内部路径 |
+| X7 | `BootError.mounted` 由 `readonly mounted: string[]` 收窄为 `readonly mounted: readonly string[]`（构造参数同步收窄）；瀑布载荷仅在返回值 `typeof === 'object' && !== null` 时替换 | ①`readonly` 字段只锁引用不锁内容，名单可被外部改写，而 07 依赖它打印退出诊断——内容也应只读；②原判断 `next !== undefined` 会让返回 `false`/`0`/`''`/`null` 的监听器把载荷浇坏（实测 `false`），契约只认"同构对象替换"。两者均为**类型面/边界收紧**，不影响既有调用方与运行时行为 |
 
 
 ## 8. 决策点记录（2026-10-16 所有者拍板，原"遗留决策点"已全部关闭）

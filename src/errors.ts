@@ -27,14 +27,14 @@ export class ToolRejected extends Error {
  * 07 CLI 负责打印名单与退出码 1；抛出前已按 §4.2 逆序 dispose 已挂载插件（R3 决议）。
  */
 export class BootError extends Error {
-  /** 已成功挂载的插件名（挂载顺序；失败的那个插件不在内） */
-  readonly mounted: string[]
+  /** 已成功挂载的插件名（挂载顺序；失败的那个插件不在内）；只读数组，外部不得改写 */
+  readonly mounted: readonly string[]
 
   /**
    * @param message 失败原因（含被指认的插件来源与底层错误信息）
-   * @param mounted 已成功挂载的插件名列表（boot 失败清理后上抛）
+   * @param mounted 已成功挂载的插件名列表（boot 失败清理后上抛；内部已复制，外部后续改动不影响本错误）
    */
-  constructor(message: string, mounted: string[]) {
+  constructor(message: string, mounted: readonly string[]) {
     super(message)
     this.name = 'BootError'
     this.mounted = mounted

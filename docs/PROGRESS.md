@@ -8,13 +8,16 @@
 **当前焦点：M0 已入库，开 01-config 新对话**
 
 - [x] M0 已提交：`8813692 feat(skeleton): plugin kernel, composition root and contracts`（25 文件 5032 行，文档 + 实现 + 测试一个 commit）；`00-skeleton.md` 状态已改 **Baseline**
+- [x] **第二轮 review 的修复已提交**（`fix(skeleton): harden dispose contract and waterfall payload replacement`）：dispose 两条约定（contracts.ts JSDoc + 设计 §4.2/§5）、瀑布载荷只认对象、`BootError.mounted` 只读数组（X7）、测试整洁三处。门禁全绿（49 例 / 1157 行）
 - [ ] 01-config 新对话开场：读 `AGENT.md` → 本文件 → `docs/design/00-skeleton.md`（Baseline，重点 §2.3 Config 与 §4.1 的 deepFreeze 归属）→ 确认状态为 Reviewed 才动工
 - [ ] 01-config 第一件事：写 `docs/design/01-config.md`（Draft），内容含 `loadConfig()` 三层合并（全局 `~/.minidsh/config.json` → 项目 `minidsh.json` → flags）、默认值合并（含 `logLevel` 默认 `'info'`，R4）、**只加载不冻结**（deepFreeze 归属恒定为 boot，见 00-skeleton.md §2.3）
 - [ ] 01 交付时注册 builtin 用 `registerBuiltin()`（经 `src/index.ts` 导出，返回退订句柄），不要深引用 `src/plugin/boot.ts`
 
-**M0 交付实况（2026-10-16）**：typecheck / lint / test 全绿（44 单测 + 4 集成 = 48 例）；`src/` 实绩 **1133 行**（预算 ~1.2k ±20% 内）；关键文件 `src/contracts.ts`（480）、`src/plugin/boot.ts`（254）、`src/plugin/containers.ts`（161）、`src/plugin/event-bus.ts`（92）、`src/plugin/logger.ts`（56）、`src/plugin/ctx.ts`（42）、`src/errors.ts`（42）、`src/index.ts`（17）；工程脚手架（package.json / tsconfig / eslint.config.js / vitest.config.ts）一并就位。
+**M0 交付实况（2026-10-16）**：typecheck / lint / test 全绿（45 单测 + 4 集成 = 49 例）；`src/` 实绩 **1157 行**（预算 ~1.2k ±20% 内）；关键文件 `src/contracts.ts`（492）、`src/plugin/boot.ts`（254）、`src/plugin/containers.ts`（166）、`src/plugin/event-bus.ts`（94）、`src/plugin/logger.ts`（56）、`src/plugin/ctx.ts`（42）、`src/errors.ts`（42）、`src/index.ts`（17）；工程脚手架（package.json / tsconfig / eslint.config.js / vitest.config.ts）一并就位。
 
 **首轮 review 修复（2026-10-16，全部已回写设计文档）**：2 个真 bug + 6 项改进——①`factory()` 返回非插件时二次抛 TypeError 绕过清理 → 加形状校验；②`shutdown` 不幂等 → 清空挂载序；③`builtinPlugins` 裸 Map 改为 `registerBuiltin()` 出口（X6，内置模块不再深引用内部路径）；④setup 半失败者纳入逆序 dispose（X5，R3 补强）；⑤`logger.ts` 补 8 例单测（此前零覆盖）；⑥`formatMeta` 对 Error 输出 stack 而非 `{}`；⑦非法 logLevel 兜底 info；⑧瀑布 `null` 载荷与 ctx.ts JSDoc 更正、集成链路 4 改为验证公共 API 出口面。偏离记录 X5–X6 已补记 `00-skeleton.md` §7。
+
+**第二轮 review 修复（2026-10-16，针对修复后新语义的派生义务）**：①插件 `dispose` 必须容忍 setup 未完成（X5 派生，写入 contracts.ts JSDoc 与设计 §4.2）；②`dispose` 不设超时、由 07 用 `Promise.race` 兜底（写入 §4.2 与本节遗留表）；③瀑布载荷只在返回值为对象时替换（X7，原判断会让 `false`/`0`/`''` 浇坏载荷）；④`BootError.mounted` 收窄为 `readonly string[]`（X7）；⑤`render()` 补 O(n log n) 调用提示；⑥测试整洁三处（补遗漏的 shutdown、fixture 路径改 `path.join`、去掉 stderr spy 的 `as never`）。偏离 X7 已补记 `00-skeleton.md` §7。
 
 ## 模块进度总表
 
@@ -22,7 +25,7 @@
 
 | # | 模块 | 需求 | 设计文档 | package | 单测 | 集成测试 | Review | Commit | 预算 | 实绩 |
 |---|---|---|---|---|---|---|---|---|---:|---:|
-| 00 | skeleton（M0） | ✓ | ✓ Reviewed | ✓ 1133 行 | ✓ 44 例 | ✓ 4 链路 | ✓ | — | ~1.2k | 1133 |
+| 00 | skeleton（M0） | ✓ | ✓ Baseline | ✓ 1157 行 | ✓ 45 例 | ✓ 4 链路 | ✓ | ✓ | ~1.2k | 1157 |
 | 01 | config | — | — | — | — | — | — | — | ~0.4k | — |
 | 02 | llm | — | — | — | — | — | — | — | ~1.5k | — |
 | 03 | session | — | — | — | — | — | — | — | ~1.5k | — |
@@ -32,7 +35,7 @@
 | 07 | cli | — | — | — | — | — | — | — | ~1.0k | — |
 | 08 | plugin-memory | — | — | — | — | — | — | — | ~0.2k | — |
 | 09 | plugin-mcp | — | — | — | — | — | — | — | ~0.7k | — |
-| | **合计** | | | | | | | | **~11.5k** | **1133** |
+| | **合计** | | | | | | | | **~11.5k** | **1157** |
 
 （目标 ~10k，硬上限 20k；统计口径见 `process.md` §6，排除测试代码）
 
@@ -60,6 +63,8 @@
 | # | 事项 | 状态 | 归属 |
 |---|---|---|---|
 | — | LOC 统计口径陷阱：`git ls-files 'src/<m>/**/*.ts'` 漏计目录顶层文件（M0 实测漏 539 行） | **已修**（process.md §6 / 00-skeleton.md §7 已并列单层 pattern） | 01 起每个模块统计时按新命令执行 |
+| — | **dispose 无超时**：单个挂起的 dispose 会让 `shutdown` 永不返回（实测确认） | **已定**（设计 §4.2 约定 2 / §5）：内核零策略，超时与强制退出由 07 的退出流程用 `Promise.race` 兜底 | 07 |
+| — | **dispose 必须容忍 setup 未完成**：boot 失败清理会 dispose 半失败插件（X5），此时 setup 可能未跑完 | **已定**（设计 §4.2 约定 1 + `contracts.ts` 的 `Plugin.dispose` JSDoc）：资源访问一律用可选链 | 02–09 全体插件作者 |
 
 ## 约定备忘（跨会话不变）
 

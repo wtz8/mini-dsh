@@ -115,6 +115,23 @@ describe('EventBus · 瀑布域', () => {
     expect(out).toEqual(invocation('bash'))
   })
 
+  it('返回非对象的 falsy 值（false / 0 / null）不替换载荷——只有同构对象才替换', async () => {
+    // 回归：仅排除 undefined 会让 `return false` 之类的手误把载荷浇成 false，
+    // 且因存储侧类型擦除而静默通过编译，下游 pipeline 拿到 false 才崩
+    const seen: unknown[] = []
+    for (const falsy of [false, 0, null, '']) {
+      const bus = new EventBusImpl(stubLogger())
+      bus.onWaterfall('tools/pre-execute', (() => falsy) as never)
+      bus.onWaterfall('tools/pre-execute', (p) => {
+        seen.push(p)
+      })
+      const out = await bus.waterfall('tools/pre-execute', invocation('bash'))
+      expect(out).toEqual(invocation('bash'))
+    }
+    // 后续监听器每次收到的都是原始载荷，而不是被浇坏的值
+    expect(seen).toEqual([invocation('bash'), invocation('bash'), invocation('bash'), invocation('bash')])
+  })
+
   it('监听器抛错即否决：错误上抛给 waterfall 调用方', async () => {
     const bus = new EventBusImpl(stubLogger())
     const boom = new Error('vetoed')

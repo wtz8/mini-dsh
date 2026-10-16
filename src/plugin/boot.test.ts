@@ -99,8 +99,9 @@ describe('boot', () => {
         received.push(config)
       },
     }))
-    await boot(makeConfig([{ ...entry1, config: { x: 1 } }]))
+    const ctx1 = await boot(makeConfig([{ ...entry1, config: { x: 1 } }]))
     expect(received[0]).toEqual({ x: 1 })
+    await shutdown(ctx1)
 
     const entry2 = addBuiltin('cfg2', () => ({
       name: 'cfg2',
@@ -108,8 +109,9 @@ describe('boot', () => {
         received.push(config)
       },
     }))
-    await boot(makeConfig([entry2]))
+    const ctx2 = await boot(makeConfig([entry2]))
     expect(received[1]).toBeUndefined()
+    await shutdown(ctx2)
   })
 
   it('setup 抛错：逆序 dispose（含半失败者）再抛 BootError，名单不含失败者，后续插件不再执行', async () => {

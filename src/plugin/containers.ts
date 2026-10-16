@@ -90,6 +90,11 @@ export class PromptRegistryImpl implements PromptRegistry {
     this.#sections.set(s.id, s)
   }
 
+  /**
+   * 拼装系统提示：每次调用都重新排序（section 数在 M0 很小，排序开销可忽略；
+   * 若 05 把大量工具 schema 注册为 section 后再成为瓶颈，可在此加脏标记缓存）。
+   * @throws section 的 render() 抛错时上抛（prompt 是每 step 的必经路径，不吞错）
+   */
   render(): string {
     // order 升序为第一关键字，id 字典序为第二关键字（设计 §2.1 的既定排序规则）
     const sorted = [...this.#sections.values()].sort((a, b) =>

@@ -4,8 +4,9 @@ import type { EventBus, Logger, NotificationMap, Unsubscribe, WaterfallMap } fro
 type NotifyListener = (p: unknown) => void
 /**
  * 瀑布监听器的内部存储形态：载荷类型在注册入口收窄，存储侧擦除为 `unknown`。
- * 返回值语义：`undefined` 表示"不替换"，其余任意值（含 `null`）视作新载荷——
- * 实现侧额外排除 `null`，避免 `null` 把载荷浇成空（契约只认对象形态的替换）。
+ * 返回值语义：只有**对象**（`typeof === 'object'` 且非 `null`）才会替换载荷，
+ * 其余一切值（含 `undefined` / `null` / `false` / `0`）均表示"保持原载荷"——
+ * 严格按契约"返回同构对象则替换"实现，避免 falsy 返回值把载荷浇坏。
  */
 type WaterfallListener = (p: unknown) => unknown | Promise<unknown>
 
@@ -83,9 +84,10 @@ export class EventBusImpl implements EventBus {
     const listeners = [...this.#bucket('waterfall', type)]
     let current = payload
     for (const fn of listeners) {
-      // 返回值非 undefined/null 则替换载荷继续；抛错即否决，上抛给调用方（不吞）
+      // 只有返回同构对象才替换载荷（契约语义）：仅排除 undefined 会让 `return false`
+      // 之类的手误把载荷浇成 false，且因类型擦除而静默通过编译
       const next = await fn(current)
-      if (next !== undefined && next !== null) current = next as WaterfallMap[K]
+      if (typeof next === 'object' && next !== null) current = next as WaterfallMap[K]
     }
     return current
   }

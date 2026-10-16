@@ -153,7 +153,8 @@ afterAll(async () => {
   await fs.rm(path.resolve(process.cwd(), FIXTURES_DIR), { recursive: true, force: true })
 })
 
-const src = (name: string): string => `${FIXTURES_DIR}/${name}`
+/** fixture 的插件来源（相对 cwd 的路径；用 path.join 保证 Windows 分隔符一致）。 */
+const src = (name: string): string => path.join(FIXTURES_DIR, name)
 
 /* ============================================================
  * 链路 1：冒烟（设计 §4.3）

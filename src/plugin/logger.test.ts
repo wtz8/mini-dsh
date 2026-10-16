@@ -7,14 +7,17 @@ import { createLogger } from './logger.js'
  * meta 序列化与降级四条行为。Logger 是 M0 内核直接交付的最终实现，此前无覆盖。
  */
 
-/** 捕获 stderr 写入内容（Logger 的输出目标；stdout 留给 07 渲染）。 */
+/**
+ * 捕获 stderr 写入内容（Logger 的输出目标；stdout 留给 07 渲染）。
+ * `process.stderr.write` 有多组重载签名，此处按最宽的 `string | Uint8Array` 实现。
+ */
 function captureStderr(): { lines: string[]; restore: () => void } {
   const lines: string[] = []
   const spy = vi.spyOn(process.stderr, 'write')
-  spy.mockImplementation(((chunk: unknown): boolean => {
-    lines.push(String(chunk))
+  spy.mockImplementation((chunk: string | Uint8Array): boolean => {
+    lines.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
     return true
-  }) as never)
+  })
   return { lines, restore: () => spy.mockRestore() }
 }
 

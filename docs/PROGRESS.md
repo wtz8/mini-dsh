@@ -13,7 +13,7 @@
   - **工具路径解析基准 = `process.cwd()`**：04 环境段写死"所有相对路径都按上面的工作目录解析"，05 不以它为基准这句话就是假的（04 §5 末行 / 本文件遗留表）
   - 消费 01 的 `resolvePermission`（工具执行的权限闸门）与 02 的 `createToolCallAccumulator`（均已就位，经 `src/index.ts` 出口）
 - [ ] 05 的评审要留意 04 复核发现的同式漏洞写法：插件实例配置 narrow 必须拒数组（`Array.isArray`，见 `04-prompt.md` §7 Y1 与本文件遗留表）
-- [x] **04 已提交**（2026-10-17）：`feat(prompt): core sections and builtin:prompt plugin`；含 `04-prompt.md` 归档 Baseline、`containers.ts` 空段过滤（Q4）、复核评审修复 Y1（P3，实例配置传数组被静默忽略）、门禁 **276 例**全绿、`src/prompt/` **491 行**
+- [x] **04 已提交**（2026-10-17）：`815bd51 feat(prompt): core sections and builtin:prompt plugin`（23 文件 +1529/−7）；含 `04-prompt.md` 归档 Baseline、`containers.ts` 空段过滤（Q4）、复核评审修复 Y1（P3，实例配置传数组被静默忽略）、门禁 **276 例**全绿、`src/prompt/` **491 行**
 
 - [x] ~~review `docs/design/03-session.md`（七节 + §8 决议表）与 Q1 拍板~~ → **已完成**：2026-10-17 所有者按建议项拍板 Q1–Q10；基线 `architecture.md` **0.1.4 → 0.1.5**（`SessionStore` 新增 `read`），四处落点已同步
 - [x] ~~03 实现~~ → **已完成**：`src/session/` 八文件 930 行 + `src/errors.ts` 增 `SessionError`（41 行）；`deriveMessages` 经 `src/index.ts` 转发
@@ -64,7 +64,7 @@
 | 01 | config | ✓ | ✓ Baseline | ✓ 420 行 | ✓ 58 例 | ✓ 8 例 / 4 链路 | ✓ | ✓ `4e97e17` | ~0.4k | 420 |
 | 02 | llm | ✓ | ✓ Baseline | ✓ 647 行 | ✓ 55 例 | ✓ 5 例 / 4 链路 | ✓ | ✓ `871bd91` | ~1.5k | 647 |
 | 03 | session | ✓ | ✓ Baseline | ✓ 930 行 | ✓ 58 例 | ✓ 7 例 / 5 链路 | ✓ | ✓ | ~1.5k | 930 |
-| 04 | prompt | ✓ | ✓ Baseline | ✓ 491 行 | ✓ 29 例 | ✓ 5 例 / 5 链路 | ✓ | ✓ | ~0.5k | 491 |
+| 04 | prompt | ✓ | ✓ Baseline | ✓ 491 行 | ✓ 29 例 | ✓ 5 例 / 5 链路 | ✓ | ✓ `815bd51` | ~0.5k | 491 |
 | 05 | tools | — | — | — | — | — | — | — | ~2.5k | — |
 | 06 | agent | — | — | — | — | — | — | — | ~2.0k | — |
 | 07 | cli | — | — | — | — | — | — | — | ~1.0k | — |

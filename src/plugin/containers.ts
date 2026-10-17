@@ -93,6 +93,11 @@ export class PromptRegistryImpl implements PromptRegistry {
   /**
    * 拼装系统提示：每次调用都重新排序（section 数在 M0 很小，排序开销可忽略；
    * 若 05 把大量工具 schema 注册为 section 后再成为瓶颈，可在此加脏标记缓存）。
+   *
+   * **渲染结果为空串的段会被跳过**（04 设计 D2/Q4）：条件段（无工具时的 tool-use、
+   * 无 MEMORY 文件时的 memory 段）返回 `''`，不过滤会拼出连续 `\n\n\n`，且无从
+   * 判断段是否生效。只过滤**严格空串**，不 trim——段作者的首尾空白属其排版意图。
+   *
    * @throws section 的 render() 抛错时上抛（prompt 是每 step 的必经路径，不吞错）
    */
   render(): string {
@@ -100,7 +105,13 @@ export class PromptRegistryImpl implements PromptRegistry {
     const sorted = [...this.#sections.values()].sort((a, b) =>
       a.order !== b.order ? a.order - b.order : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
     )
-    return sorted.map((s) => s.render()).join('\n\n')
+    const parts: string[] = []
+    for (const s of sorted) {
+      const text = s.render()
+      if (text === '') continue
+      parts.push(text)
+    }
+    return parts.join('\n\n')
   }
 }
 

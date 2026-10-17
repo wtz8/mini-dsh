@@ -158,7 +158,7 @@ src/
 
 **容器**（全部由内核在 boot 时创建，readonly 引用注入 Ctx）：
 
-- `LlmRegistry` / `ToolRegistry` / `PromptRegistry` / `AgentRegistry`：真实最小实现——`register` 查重（重复名抛错）、`resolve`/`get` 未注册抛 `'not mounted'`；`PromptRegistry.render()` 按 `order` 升序、同序按 id 字典序拼接（分隔符 `\n\n`）。
+- `LlmRegistry` / `ToolRegistry` / `PromptRegistry` / `AgentRegistry`：真实最小实现——`register` 查重（重复名抛错）、`resolve`/`get` 未注册抛 `'not mounted'`；`PromptRegistry.render()` 按 `order` 升序、同序按 id 字典序拼接（分隔符 `\n\n`）。**2026-10-17 补记（04 设计 D2/Q4 拍板）**：`render()` 会**跳过渲染结果为空串的段**——条件段（无工具时的 tool-use、无 MEMORY 时的 memory 段）返回 `''`，不过滤会拼出连续空行。只过滤严格空串、不 trim；排序键与分隔符不变，属实现行为调整、非签名变更。段 render 抛错仍上抛、不吞。
 - `SessionStoreContainer`：见 D1，委托式容器。**2026-10-17 基线 0.1.5 补记**：`SessionStore` 新增 `read(id): Promise<SessionEvent[]>`（03 设计 §2.4 D1 / §8-Q1 拍板），容器相应多一条委托；原因与影响面见 `architecture.md` §12 的 0.1.5 行。M0 的语义不变——未 mount 前仍抛 `'not mounted'`，二次 mount 仍抛错。
 - `Logger`：`debug/info/warn/error(msg: string, ...meta: unknown[])`；level 取 `config.logLevel`（R4 决议，缺省 `'info'`），输出到 stderr。
 - `signal`：boot 内 `new AbortController()`，`ctx.signal` 即其 `signal`；触发逻辑（Ctrl+C 两段式）归 07，M0 只暴露通道。

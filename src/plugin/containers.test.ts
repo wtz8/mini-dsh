@@ -98,6 +98,32 @@ describe('PromptRegistry', () => {
     reg.section(section('dup', 1))
     expect(() => reg.section(section('dup', 2))).toThrow(/already registered/)
   })
+
+  // 04 设计 D2/Q4：条件段（无工具时的 tool-use、无 MEMORY 时的 memory 段）返回空串，
+  // 不过滤会拼出连续空行。只过滤**严格空串**，不 trim（段作者的首尾空白是排版意图）。
+  it('render 跳过渲染结果为空串的段（不产生连续空行）', () => {
+    const reg = new PromptRegistryImpl()
+    reg.section(section('a', 10))
+    reg.section(section('b-empty', 20, ''))
+    reg.section(section('c', 30))
+    reg.section(section('d-empty', 40, ''))
+
+    expect(reg.render()).toBe('SECTION:a\n\nSECTION:c')
+  })
+
+  it('render 不过滤空白但非空的段（不 trim，尊重段作者排版）', () => {
+    const reg = new PromptRegistryImpl()
+    reg.section(section('a', 10, '  '))
+    reg.section(section('b', 20))
+
+    expect(reg.render()).toBe('  \n\nSECTION:b')
+  })
+
+  it('段 render 抛错时上抛，不吞（prompt 是每 step 必经路径）', () => {
+    const reg = new PromptRegistryImpl()
+    reg.section({ id: 'boom', order: 1, render: () => { throw new Error('section failed') } })
+    expect(() => reg.render()).toThrow('section failed')
+  })
 })
 
 describe('SessionStoreContainer', () => {

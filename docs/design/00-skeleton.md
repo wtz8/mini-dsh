@@ -83,6 +83,8 @@ interface WaterfallMap {
 
 **运行时值的落点**（contracts.ts 保持纯类型模块）：`ToolRejected`（pre-execute 否决专用异常，05 的 pipeline 捕获后转 `permission_denied` 结果）与 `BootError`（见 §4.1，携带 `mounted: readonly string[]`，X7）定义在 `src/errors.ts`。骨架设计未指定错误类的文件归属，此为澄清而非偏离。
 
+> **01 起本文件新增第三类**：`ConfigError`（配置加载/校验失败）同样落 `src/errors.ts`，见 `01-config.md` §2.1 D4 / §8-Q4。错误类集中一处的约定不变。
+
 ### 2.2 Session 词汇（枚举 M0 定，字段细节 03 细化）
 
 ```ts

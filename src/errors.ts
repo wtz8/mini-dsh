@@ -22,6 +22,35 @@ export class ToolRejected extends Error {
 }
 
 /**
+ * 配置错误（01 的 `loadConfig()` 出口）：JSON 非法或字段校验失败。
+ *
+ * 与 `BootError` 的分工：本错误发生在 **`boot()` 之前**（宿主加载配置阶段），
+ * 因此不存在"已挂载插件需要清理"的语义；07 CLI 捕获后打印 `path` / `file`
+ * 诊断并以退出码 1 退出，此时进程尚未创建任何资源。
+ *
+ * 落点与 `ToolRejected` / `BootError` 同处（设计 §2.1 D4 / §8-Q4）：错误类集中一处，
+ * 并经 `src/index.ts` 转发。
+ */
+export class ConfigError extends Error {
+  /** 出错的配置字段路径（如 `config.tools.bash.timeoutMs`）；文件级错误时缺省 */
+  readonly path?: string
+  /** 出错的配置文件绝对路径；字段校验错误时缺省 */
+  readonly file?: string
+
+  /**
+   * @param message 人类可读的失败原因（英文，与内核其余错误保持一致）
+   * @param options.path 字段路径（校验失败时给出，便于 07 直接打印定位）
+   * @param options.file 配置文件路径（读取/解析失败时给出）
+   */
+  constructor(message: string, options?: { path?: string; file?: string }) {
+    super(message)
+    this.name = 'ConfigError'
+    this.path = options?.path
+    this.file = options?.file
+  }
+}
+
+/**
  * 启动失败异常：boot 的 fail-fast 出口（设计 §4.1）。
  * 携带 `mounted`（已成功挂载的插件名，按挂载顺序）——
  * 07 CLI 负责打印名单与退出码 1；抛出前已按 §4.2 逆序 dispose 已挂载插件（R3 决议）。

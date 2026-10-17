@@ -137,6 +137,10 @@ export class SessionStoreContainerImpl implements SessionStoreContainer {
     return this.#store().list()
   }
 
+  async read(id: string): Promise<SessionEvent[]> {
+    return this.#store().read(id)
+  }
+
   async append(sessionId: string, event: SessionEvent): Promise<void> {
     return this.#store().append(sessionId, event)
   }

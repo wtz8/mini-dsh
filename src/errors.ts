@@ -93,6 +93,47 @@ export class LlmError extends Error {
 }
 
 /**
+ * 会话错误分类（03 的 `SessionError`）：
+ *
+ * - `not_found`：会话 id 不存在（`open` / `read` / `subscribe` 指向未知会话）；
+ * - `io`：读写或建目录失败（EACCES / ENOSPC / 目标文件已存在等）；
+ * - `corrupt`：文件结构损坏（空文件、首个有效事件不是 `session/header`）。
+ *
+ * 坏行（崩溃留下的半行 JSON）**不算** corrupt——它按"跳过 + warn"处理（03 设计 §5）。
+ */
+export type SessionErrorKind = 'not_found' | 'io' | 'corrupt'
+
+/**
+ * 会话存储失败（03 的 `builtin:session` 出口，设计 §2.3 / §8-Q2）。
+ *
+ * 为什么要分类而不是靠 message 猜：07 对三种失败的提示完全不同——
+ * `not_found` 该提示可用会话列表，`io` 该提示磁盘权限，`corrupt` 该提示文件已损坏。
+ *
+ * 与既有错误类的生命周期分工：`ConfigError` 在 `boot()` **之前**、`BootError` 在
+ * `boot()` **期间**、本错误与 `LlmError` 都在**运行期**（本错误发生在 `ctx.sessions.*`
+ * 的调用点，`LlmError` 发生在 adapter 调用点）。
+ */
+export class SessionError extends Error {
+  /** 失败分类（机器可判，供 07 分支处置） */
+  readonly kind: SessionErrorKind
+  /** 出错的文件/目录绝对路径（便于 07 直接打印定位） */
+  readonly file?: string
+
+  /**
+   * @param message 人类可读的失败原因（英文，与内核其余错误保持一致）
+   * @param options.kind 失败分类
+   * @param options.file 出错的文件路径（`not_found` / `io` / `corrupt` 均可给出）
+   * @param options.cause 底层错误（`fs` 的原始错误，保留调用链）
+   */
+  constructor(message: string, options: { kind: SessionErrorKind; file?: string; cause?: unknown }) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause })
+    this.name = 'SessionError'
+    this.kind = options.kind
+    this.file = options.file
+  }
+}
+
+/**
  * 启动失败异常：boot 的 fail-fast 出口（设计 §4.1）。
  * 携带 `mounted`（已成功挂载的插件名，按挂载顺序）——
  * 07 CLI 负责打印名单与退出码 1；抛出前已按 §4.2 逆序 dispose 已挂载插件（R3 决议）。

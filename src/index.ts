@@ -9,8 +9,10 @@
  * - 组合根 `boot` / `shutdown`；
  * - `resolvePermission`：权限匹配函数（01 解析、05 在 pre-execute 调用，属插件侧能力）；
  * - `createToolCallAccumulator`：tool-call 增量聚合器（02 提供、06 消费，属插件侧能力）；
- * - 运行时错误类 `ToolRejected` / `BootError` / `ConfigError` / `LlmError`
- *   （01 起新增配置错误类，02 起新增 LLM 调用错误类）。
+ * - `deriveMessages`：session log → `ChatMessage[]` 的纯函数投影（03 提供、06 消费，
+ *   属插件侧能力；灵魂 #2 的唯一出口）；
+ * - 运行时错误类 `ToolRejected` / `BootError` / `ConfigError` / `LlmError` / `SessionError`
+ *   （01 起新增配置错误类，02 起新增 LLM 调用错误类，03 起新增会话存储错误类）。
  *
  * 01 的 `loadConfig()` 是宿主侧能力（架构 §5.5：config 不属于插件系统），
  * 不经本出口，宿主与集成测试从 `src/config/index.js` 引入。
@@ -23,5 +25,7 @@ export { resolvePermission } from './config/permissions.js'
 /** 02 的插件侧能力：06 在回合循环里用它把 tool-call 增量拼回完整调用（设计 §2.2） */
 export { createToolCallAccumulator } from './llm/accumulate.js'
 export type { ToolCallAccumulator } from './llm/accumulate.js'
-export { ToolRejected, BootError, ConfigError, LlmError } from './errors.js'
-export type { LlmErrorKind } from './errors.js'
+/** 03 的插件侧能力：06 每 step 用它把 session log 投影成模型可见消息（灵魂 #2 的唯一出口） */
+export { deriveMessages } from './session/derive.js'
+export { ToolRejected, BootError, ConfigError, LlmError, SessionError } from './errors.js'
+export type { LlmErrorKind, SessionErrorKind } from './errors.js'

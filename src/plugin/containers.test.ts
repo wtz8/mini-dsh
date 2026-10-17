@@ -108,6 +108,7 @@ describe('SessionStoreContainer', () => {
       create: async () => ({ id: 's1', meta: { id: 's1', createdAt: '', provider: '', model: '', cwd: '' } }) as Session,
       open: async (id: string) => ({ id, meta: { id, createdAt: '', provider: '', model: '', cwd: '' } }),
       list: async () => [],
+      read: async () => [{ type: 'turn/start', turnNo: 7 }] as SessionEvent[],
       append: async (_id: string, e: SessionEvent) => {
         appended.push(e)
       },
@@ -124,6 +125,7 @@ describe('SessionStoreContainer', () => {
     await expect(container.create(init)).rejects.toThrow(/not mounted/)
     await expect(container.open('s1')).rejects.toThrow(/not mounted/)
     await expect(container.list()).rejects.toThrow(/not mounted/)
+    await expect(container.read('s1')).rejects.toThrow(/not mounted/)
     await expect(container.append('s1', { type: 'turn/start', turnNo: 1 })).rejects.toThrow(/not mounted/)
     expect(() => container.subscribe('s1', () => {})).toThrow(/not mounted/)
   })
@@ -138,6 +140,9 @@ describe('SessionStoreContainer', () => {
 
     const session = await container.open('s1')
     expect(session.id).toBe('s1')
+
+    // read 是 0.1.5 新增的读取口（03 设计 §2.4 D1）：同样走委托
+    expect(await container.read('s1')).toEqual([{ type: 'turn/start', turnNo: 7 }])
   })
 
   it('第二次 mount 抛错（一次性注入通道）', () => {

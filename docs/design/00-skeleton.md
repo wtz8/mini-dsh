@@ -159,7 +159,7 @@ src/
 **容器**（全部由内核在 boot 时创建，readonly 引用注入 Ctx）：
 
 - `LlmRegistry` / `ToolRegistry` / `PromptRegistry` / `AgentRegistry`：真实最小实现——`register` 查重（重复名抛错）、`resolve`/`get` 未注册抛 `'not mounted'`；`PromptRegistry.render()` 按 `order` 升序、同序按 id 字典序拼接（分隔符 `\n\n`）。
-- `SessionStoreContainer`：见 D1，委托式容器。
+- `SessionStoreContainer`：见 D1，委托式容器。**2026-10-17 基线 0.1.5 补记**：`SessionStore` 新增 `read(id): Promise<SessionEvent[]>`（03 设计 §2.4 D1 / §8-Q1 拍板），容器相应多一条委托；原因与影响面见 `architecture.md` §12 的 0.1.5 行。M0 的语义不变——未 mount 前仍抛 `'not mounted'`，二次 mount 仍抛错。
 - `Logger`：`debug/info/warn/error(msg: string, ...meta: unknown[])`；level 取 `config.logLevel`（R4 决议，缺省 `'info'`），输出到 stderr。
 - `signal`：boot 内 `new AbortController()`，`ctx.signal` 即其 `signal`；触发逻辑（Ctrl+C 两段式）归 07，M0 只暴露通道。
 

@@ -349,9 +349,18 @@ export interface PromptRegistry {
 /** 会话存储（03 的 `builtin:session` 提供；M0 内核交付委托式容器）。 */
 export interface SessionStore {
   create(opts: SessionInit): Promise<Session>
-  /** resume：按 id 打开既有会话；不存在的行为归 03 定义。 */
+  /** resume：按 id 打开既有会话；不存在的行为归 03 定义（03 决议：抛 `SessionError{kind:'not_found'}`）。 */
   open(id: string): Promise<Session>
   list(): Promise<SessionMeta[]>
+  /**
+   * 取回一个会话的**全量事件序列**（按写入顺序；03 决议返回快照，调用方改动不影响内部）。
+   *
+   * 这是"模型可见事实只来自 log 投影"（灵魂 #2）的输入口：06 每 step 调 `read` +
+   * `deriveMessages` 拼出 `LLMRequest.messages`，不得在内存里另存一份对话状态。
+   *
+   * @throws 会话不存在（03 决议：抛 `SessionError{kind:'not_found'}`）
+   */
+  read(id: string): Promise<SessionEvent[]>
   append(sessionId: string, event: SessionEvent): Promise<void>
   subscribe(sessionId: string, fn: (e: SessionEvent) => void): Unsubscribe
 }

@@ -1,7 +1,7 @@
 # MiniDSH 骨架设计
 
 > 状态：Reviewed（2026-10-16 所有者拍板 Q1–Q6，可进入 M0 模块设计）
-> 版本：0.1.4（修订记录见 §12）
+> 版本：0.1.5（修订记录见 §12）
 > 参考实现：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) `86a402200d`
 
 ## 1. 项目定位
@@ -138,6 +138,7 @@ interface PromptRegistry{ section(s: PromptSection): void
 interface SessionStore  { create(opts: SessionInit): Promise<Session>
                           open(id: string): Promise<Session>     // resume
                           list(): Promise<SessionMeta[]>
+                          read(id: string): Promise<SessionEvent[]>   // 0.1.5 新增，见 §5.4 下方说明
                           append(sessionId: string, event: SessionEvent): Promise<void>
                           subscribe(sessionId: string, fn: (e: SessionEvent) => void): Unsubscribe }
 interface AgentRegistry  { register(ctl: AgentControl): void
@@ -385,4 +386,5 @@ mini-dsh/
 | 0.1.1-draft | 系统提示入口收敛为 `PromptRegistry.render()` 唯一出口；瀑布事件的注册 API 定为 `onWaterfall`；agent 装配语义明确为“容器对象引用恒定、插件只注册不替换”；LOC 统计口径（排除测试、逐模块预算） |
 | 0.1.2-draft | §5.4 补工具契约（`ToolDefinition` / `ToolInvocation` / `ToolResult` / `ToolErrorCode`）及其 pipeline 产出约定 —— 因工具定义同时被 04 与 06 消费，属跨模块词汇；§5.5 明确 config 非插件、由宿主在 boot 前冻结注入；§11 增补 Q6（permissions 通配符匹配规则）；新增本节作为修订落点 |
 | 0.1.3 | 所有者拍板 Q1–Q6（§11 改为决议表），状态 Draft → Reviewed；§5.2 补取消信号边界（`ctx.signal` 仅进程级，回合取消走 `cancel()`，Ctrl+C 两段式）与 adapter 解析约定（resolve name = `config.model.provider`，未知 provider fail-fast）；§5.3 补通知事件错误策略（监听器抛错记 log、emit 永不抛）；§5.4 补超时来源说明与权限匹配规则（精确键 > `前缀*` 通配 > 兜底 `ask`，裸 `*` 视为配置错误） |
+| 0.1.5 | §5.2 给 `SessionStore` **新增** `read(id): Promise<SessionEvent[]>`（03 设计 §2.4 D1 / §8-Q1，所有者 2026-10-17 拍板）：原契约只写不读（`create/open/list/append/subscribe` 无任何取回事件序列的口子），而 §6 要求 `messages = deriveMessages(session)`——投影没有输入来源。补 `read` 前，06 只剩三条路且均不可接受：用 `subscribe` 自建内存投影（违反灵魂 #2）、让 `open()` 返回的 `Session` 挂 `events` 快照（经容器后静态类型塌缩为 `Session`，需 downcast，且"句柄即快照"语义模糊）、直接 import 03 内部模块（违反"插件间不 import 彼此"）。纯新增方法，不改动任何既有签名；同步落点：`src/contracts.ts`、`src/plugin/containers.ts`（委托）、`src/plugin/containers.test.ts` |
 | 0.1.4 | §5.4 权限匹配规则 2 修订：通配键由"声明序取首个命中"改判"**最长前缀**优先（同长时取声明序在前者）"。理由：`permissions` 是三层逐键深合并产物，键序由合并层序决定（全局层键恒前于项目层），按声明序会让全局层宽泛规则（如 `mcp__*`）永久压住项目层更严格规则（如 `mcp__github*`），权限收紧静默失效且无诊断。改判后语义为"更具体的规则总是赢"，不再依赖不可见的键序。影响面：01 `resolvePermission`、05 pre-execute |

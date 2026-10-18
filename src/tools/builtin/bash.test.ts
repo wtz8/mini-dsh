@@ -24,7 +24,10 @@ function stderrCommand(): string {
 
 /** 按 shell 语法给出"长时间睡眠"的命令（取消测试用）。 */
 function sleepCommand(): string {
-  return shell.label === 'powershell' ? 'Start-Sleep -Seconds 5' : 'sleep 5'
+  // 20 秒：必须**远大于**"杀进程"在满载机器上的耗时。POSIX 路径自带 1.5s 的
+  // SIGTERM→SIGKILL 宽限，叠加 spawn/信号投递的排队后，全量并发跑实测可到 6s+；
+  // 若睡眠时长只留 1s 余量（原为 5s），"杀得慢"就会被断言误判成"没杀掉"。
+  return shell.label === 'powershell' ? 'Start-Sleep -Seconds 20' : 'sleep 20'
 }
 
 describe('resolveShell', () => {
@@ -58,16 +61,17 @@ describe('bash 工具', () => {
     expect(out).toContain('oops')
   })
 
-  it('取消信号到达时杀掉子进程并抛错（不挂住回合）', { timeout: 15_000 }, async () => {
-    // 显式拉长 vitest 超时：杀进程依赖真实 taskkill/信号，全量并发跑时机器负载高，
-    // 默认 5s 超时会把"杀得慢"误判成"挂死"；<4000ms 断言仍能抓住"根本没杀掉"
-    // （杀不掉时进程自然退出需 5s，断言会失败）
+  it('取消信号到达时杀掉子进程并抛错（不挂住回合）', { timeout: 25_000 }, async () => {
+    // 只断言"在子进程自然退出前很久就返回"，**不断言"瞬间返回"**：杀进程的耗时取决于
+    // 机器负载（taskkill / 信号投递会被排队拖慢），但再慢也远小于 20s 的睡眠时长。
+    // 若根本没杀掉，就得等 sleep 自然结束（20s）才返回，断言即失败——这才是本用例
+    // 要守的语义（"取消 ⇒ 不挂住回合"），而非某个绝对毫秒数。
     const controller = new AbortController()
     const started = Date.now()
     const pending = tool.execute({ command: sleepCommand() }, env(controller.signal))
     setTimeout(() => controller.abort(), 100)
     await expect(pending).rejects.toThrow(/取消/)
-    expect(Date.now() - started).toBeLessThan(4000)
+    expect(Date.now() - started).toBeLessThan(12_000)
   })
 
   it('并发两个调用互不影响（每次都是独立进程）', async () => {

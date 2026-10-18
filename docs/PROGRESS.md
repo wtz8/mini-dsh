@@ -8,7 +8,7 @@
 **当前焦点：05-tools 已提交（2026-10-18，`e8d2591` 跨模块评审修复 + 05 实现），下一个模块是 06-agent**
 
 - [ ] **第一件事：开 06-agent 新对话**——读 `AGENT.md` → 本文件 → `05-tools.md`（Baseline，重点 §4.3 接线约定与 §8 附则的 06 职责边界）→ `architecture.md` 0.1.5 §6（回合循环与并发调度）→ 产出 `docs/design/06-agent.md`（Draft）。06 必须遵守的接口约定见下方"给 06 的接口约定"条目
-- [x] **05 已提交**（2026-10-18）：两笔 commit —— `e8d2591 fix: cross-module attack review findings`（28 文件 +939/−73，门禁 296 例）与 05 的 `feat(tools): guarded pipeline with six builtin tools`（`src/tools/` 1844 行 + `tests/integration/tools.test.ts` + `src/index.ts` 转发 + `05-tools.md` 归档 Baseline，门禁 418 例）
+- [x] **05 已提交**（2026-10-18）：两笔 commit —— `e8d2591 fix: cross-module attack review findings`（28 文件 +939/−73，门禁 296 例）与 `9059397 feat(tools): guarded pipeline with six builtin tools`（32 文件 +3993/−17：`src/tools/` 1844 行 + `tests/integration/tools.test.ts` + `src/index.ts` 转发 + `05-tools.md` 归档 Baseline，门禁 418 例）
 - [x] **05 所有者 review 已完成**（2026-10-18）：读码全量 + 门禁复跑 + 探针实证；修复 **Y2**（schema 校验子集收敛回 §3.1 文档口径）、**Y3**（taskkill spawn 补 error 监听——探针实证 unhandled 'error' 会炸整个进程）、**Y4**（bash 取消用例显式 15s 超时，硬化高负载下的偶发误判）；另订正文档三处漂移（§4.2 引入来源、§4.3 工厂名 `createBashTimeoutResolver`、§6.2 fixture 口径）。首轮全量测试曾有一次 bash 取消用例超时，单跑 3 次 + 全量复跑均绿，定性为负载偶发并已按 Y4 硬化
 - [x] **05 设计已拍板**（2026-10-18）：Q1–Q10 全部按建议项（六工具 / 权限门在瀑布之后 / 注入 approve 且失败关闭 / 未知工具报 execution_error / tools 段只列参数骨架 / 支持 disabled / glob·grep 跳过两个大目录 / bash 探测一次且超时只能调小 / 64k 中段截断 / 不新增错误类）
 - [x] **05 实现与测试完成**：`src/tools/` **1844 行**（pipeline 440 / bash 209 / schema 200 / fs-walk 157 / plugin 139 / read 116 / grep 114 / edit 97 / types 70 / glob 70 / write 52 / path 50 / section 51 / fs-error 38 / index 27 / projection 14；Y2/Y3 后口径）；单测 **115 例**（pipeline 32 / schema 20 / read 9 / plugin 9 / glob 7 / grep 7 / bash 7 / path 6 / edit 6 / section 5 / write 4 / projection 3）；集成 **7 例 / 6 链路**
@@ -77,7 +77,7 @@
 | 02 | llm | ✓ | ✓ Baseline | ✓ 677 行 | ✓ 57 例 | ✓ 5 例 / 4 链路 | ✓ | ✓ `871bd91` | ~1.5k | 677 |
 | 03 | session | ✓ | ✓ Baseline | ✓ 1070 行 | ✓ 66 例 | ✓ 7 例 / 5 链路 | ✓ | ✓ | ~1.5k | 1070 |
 | 04 | prompt | ✓ | ✓ Baseline | ✓ 515 行 | ✓ 30 例 | ✓ 5 例 / 5 链路 | ✓ | ✓ `815bd51` | ~0.5k | 515 |
-| 05 | tools | ✓ | ✓ Reviewed | ✓ 1844 行 | ✓ 115 例 | ✓ 7 例 / 6 链路 | ✓（Y1–Y4 已修，待提交） | — | ~2.5k | 1844 |
+| 05 | tools | ✓ | ✓ Baseline | ✓ 1844 行 | ✓ 115 例 | ✓ 7 例 / 6 链路 | ✓（Y1–Y4 已修） | ✓ `9059397` | ~2.5k | 1844 |
 | 06 | agent | — | — | — | — | — | — | — | ~2.0k | — |
 | 07 | cli | — | — | — | — | — | — | — | ~1.0k | — |
 | 08 | plugin-memory | — | — | — | — | — | — | — | ~0.2k | — |

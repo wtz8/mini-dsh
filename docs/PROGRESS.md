@@ -5,14 +5,17 @@
 
 ## 下一步动作（下一个会话从这里开始）
 
-**当前焦点：04-prompt 已提交（2026-10-17），下一个模块是 05-tools（完全未开始，连设计文档都没有；预算 ~2.5k，是迄今最大的模块）**
+**当前焦点：05-tools 已提交（2026-10-18，`e8d2591` 跨模块评审修复 + 05 实现），下一个模块是 06-agent**
 
-- [ ] **第一件事：开 05-tools 新对话**——按 `AGENT.md` 交接协议读 `AGENT.md` → 本文件 → `04-prompt.md`（Baseline，重点 §2.2 的 `PROMPT_ORDER` 与文末"与 05/06/08 的职责边界"）→ `architecture.md` 0.1.5 §5（工具契约与 `ToolDefinition`）→ 产出 `docs/design/05-tools.md`（Draft）
-- [ ] **05 必须承接的跨模块承诺（写进 05 设计文档与 DoD）**：
-  - 工具 schema 以 `order: PROMPT_ORDER.tools`（**350**）注册一个 prompt 段，工具清单只有这一个真值出口（04 §7 附则）
-  - **工具路径解析基准 = `process.cwd()`**：04 环境段写死"所有相对路径都按上面的工作目录解析"，05 不以它为基准这句话就是假的（04 §5 末行 / 本文件遗留表）
-  - 消费 01 的 `resolvePermission`（工具执行的权限闸门）与 02 的 `createToolCallAccumulator`（均已就位，经 `src/index.ts` 出口）
-- [ ] 05 的评审要留意 04 复核发现的同式漏洞写法：插件实例配置 narrow 必须拒数组（`Array.isArray`，见 `04-prompt.md` §7 Y1 与本文件遗留表）
+- [ ] **第一件事：开 06-agent 新对话**——读 `AGENT.md` → 本文件 → `05-tools.md`（Baseline，重点 §4.3 接线约定与 §8 附则的 06 职责边界）→ `architecture.md` 0.1.5 §6（回合循环与并发调度）→ 产出 `docs/design/06-agent.md`（Draft）。06 必须遵守的接口约定见下方"给 06 的接口约定"条目
+- [x] **05 已提交**（2026-10-18）：两笔 commit —— `e8d2591 fix: cross-module attack review findings`（28 文件 +939/−73，门禁 296 例）与 05 的 `feat(tools): guarded pipeline with six builtin tools`（`src/tools/` 1844 行 + `tests/integration/tools.test.ts` + `src/index.ts` 转发 + `05-tools.md` 归档 Baseline，门禁 418 例）
+- [x] **05 所有者 review 已完成**（2026-10-18）：读码全量 + 门禁复跑 + 探针实证；修复 **Y2**（schema 校验子集收敛回 §3.1 文档口径）、**Y3**（taskkill spawn 补 error 监听——探针实证 unhandled 'error' 会炸整个进程）、**Y4**（bash 取消用例显式 15s 超时，硬化高负载下的偶发误判）；另订正文档三处漂移（§4.2 引入来源、§4.3 工厂名 `createBashTimeoutResolver`、§6.2 fixture 口径）。首轮全量测试曾有一次 bash 取消用例超时，单跑 3 次 + 全量复跑均绿，定性为负载偶发并已按 Y4 硬化
+- [x] **05 设计已拍板**（2026-10-18）：Q1–Q10 全部按建议项（六工具 / 权限门在瀑布之后 / 注入 approve 且失败关闭 / 未知工具报 execution_error / tools 段只列参数骨架 / 支持 disabled / glob·grep 跳过两个大目录 / bash 探测一次且超时只能调小 / 64k 中段截断 / 不新增错误类）
+- [x] **05 实现与测试完成**：`src/tools/` **1844 行**（pipeline 440 / bash 209 / schema 200 / fs-walk 157 / plugin 139 / read 116 / grep 114 / edit 97 / types 70 / glob 70 / write 52 / path 50 / section 51 / fs-error 38 / index 27 / projection 14；Y2/Y3 后口径）；单测 **115 例**（pipeline 32 / schema 20 / read 9 / plugin 9 / glob 7 / grep 7 / bash 7 / path 6 / edit 6 / section 5 / write 4 / projection 3）；集成 **7 例 / 6 链路**
+- [x] **05 自检评审完成**（读码 + 7 例临时探针，跑完即删）：无 P0/P1，坐实 1 个 P3 → **Y1**（post-execute 丢掉 `error` 时保留原错误码）；4 项误报经探针证伪（忽略 abort 的工具不会挂死 / 改冻结快照不会炸 / start-end 成对 / `**` 允许零层）；偏离 X1–X6 与 Y1 已回写 `05-tools.md` §7
+- [ ] **给 06 的接口约定（已定，06 必须遵守）**：setup 内 `createToolRunner(ctx, { approve, timeoutFor: createBashTimeoutResolver(ctx.config) })` 一次；每 step 调 `runner.run(call, {sessionId,turnNo,stepNo,signal})`；`req.tools = toToolSchemas(ctx.tools.list())`；**06 不得自行 append `tool/result`**，也不得绕过 runner 直接调 `def.execute`；调度按 `ToolDefinition.concurrency`（bash/write/edit 为 `exclusive`）
+- [ ] **给 07 的两条 DoD（累积中）**：①默认 `plugins` 非空且含 `builtin:prompt` / `builtin:tools`（`builtin:tools` 未挂时 `render()` 无工具段、任何调用得 `execution_error`）；②提供审批实现并经 `registerBuiltin('agent-loop', createAgentPlugin({ approve }))` 注入——否则所有 `ask`（含默认兜底）都失败关闭，CLI 会"什么都不能写"
+- [ ] **给 08 的提示**：写 `~/.minidsh/memory/MEMORY.md` 用 `src/index.ts` 转发的 `resolvePath`，不要自己拼路径（与 04 环境段的"工作目录"承诺共用同一基准）
 - [x] **04 已提交**（2026-10-17）：`815bd51 feat(prompt): core sections and builtin:prompt plugin`（23 文件 +1529/−7）；含 `04-prompt.md` 归档 Baseline、`containers.ts` 空段过滤（Q4）、复核评审修复 Y1（P3，实例配置传数组被静默忽略）、门禁 **276 例**全绿、`src/prompt/` **491 行**
 
 - [x] ~~review `docs/design/03-session.md`（七节 + §8 决议表）与 Q1 拍板~~ → **已完成**：2026-10-17 所有者按建议项拍板 Q1–Q10；基线 `architecture.md` **0.1.4 → 0.1.5**（`SessionStore` 新增 `read`），四处落点已同步
@@ -41,7 +44,7 @@
 
 **01 交付实况（2026-10-16）**：门禁全绿（typecheck / lint / 108 例 = M0 49 + 01 单测 52 + 集成 7）；`src/config/` **388 行**（预算 ~0.4k，区间 320–480 内）——defaults 31 / merge 45 / validate 141 / permissions 36 / load 82 / types 39 / index 14；另在 `src/errors.ts` 增 `ConfigError` 30 行（单独计，属 M0 文件）。实现期偏离 **X1–X3** 已补记 `01-config.md` §7：X1 校验器也跳 `__proto__`（公共导出可被直接喂 JSON.parse 产物）、X2 `ConfigOverride` 用 type 别名（TS 隐式索引签名不给 interface）、X3 集成 fixture 目录独立（M0 的 `fixtures/` 在 afterAll 整目录删除，并行会互相踩踏）。另回写 `00-skeleton.md` §2.1 一行：errors.ts 自 01 起新增 ConfigError。
 
-**01 首轮 review 修复（2026-10-16，攻击式评审后回写，门禁 114 例全绿）**：共 9 条，偏离 **X4–X8** 已补记 `01-config.md` §7（X1–X3 为实现期）。①**X4 权限通配改"最长前缀优先"**（P0，安全语义）：`permissions` 跨层逐键合并后键序由"哪层先合并"决定，按架构原决议的"声明序取首个命中"会让全局层 `mcp__*` 永久压住项目层 `mcp__github*` —— 权限收紧静默失效。**已同步修订 `architecture.md` §5.4 规则 2 并附修订说明，属基线改动待 owner 复核**。②**X5 剥离 UTF-8 BOM**：记事本保存的配置会让 `JSON.parse` 报 `Unexpected token 'ï»¿'`，Windows 上必踩。③**X6 `resolvePermission` 经 `src/index.ts` 转发**：它是插件侧能力（05 要用），否则 05 只能深引用内部路径。④**X7 拒绝 permissions 空键**（设计本就要求非空，实现漏了，空键是永不命中的死配置）。⑤**X8 `requireString` 返回 trim 后的值**（`' p '` 不该透传给 02）。⑥`logLevel` 缺省补 `'info'`（实现原返回 `undefined`，与 §4.2 不符）。⑦修正 `types.ts` 注释（permissions 是逐键合并，非整值替换）。⑧补 5 例测试：BOM、跨层 permissions 合并、空键、logLevel 兜底、字符串归一化，另加一条集成回归（跨层更具体规则生效）。⑨设计 §4.2 补"Config 增字段须同步 validate.ts"的同步义务，守卫是 `validate.test.ts` 的"默认配置通过校验且字段完整保留"（此例此前已存在，现补注释点明其守卫作用）。**已核查排除**：loadConfig 返回值与 flags 入参不共享子对象引用，此前担心的 deepFreeze 污染不成立。
+**01 首轮 review 修复（2026-10-16，攻击式评审后回写，门禁 114 例全绿）**：共 9 条，偏离 **X4–X8** 已补记 `01-config.md` §7（X1–X3 为实现期）。①**X4 权限通配改"最长前缀优先"**（P0，安全语义）：`permissions` 跨层逐键合并后键序由"哪层先合并"决定，按架构原决议的"声明序取首个命中"会让全局层 `mcp__*` 永久压住项目层 `mcp__github*` —— 权限收紧静默失效。**已同步修订 `architecture.md` §5.4 规则 2 并附修订说明，属基线改动待 owner 复核**。②**X5 剥离 UTF-8 BOM**：记事本保存的配置会让 `JSON.parse` 报 `Unexpected token 'ï»¿'`，Windows 上必踩。③**X6 `resolvePermission` 经 `src/index.ts` 转发**：它是插件侧能力（05 要用），否则 05 只能深引用内部路径。④**X7 拒绝 permissions 空键**（设计本就要求非空，实现漏了，空键是永不命中的死配置）。⑤**X8 `requireString` 返回 trim 后的值**（`' p '` 不该透传给 02）。⑥`logLevel` 缺省补 `'info'`（实现原返回 `undefined`，与 §4.2 不符）。⑦修正 `types.ts` 注释（permissions 是逐键合并，非整值替换）。⑧补 5 例测试：BOM、跨层 permissions 合并、空键、logLevel 兜底、字符串归一化，另加一条集成回归（跨层更具体规则生效）。⑨设计 §4.2 补"Config 增字段须同步 validate.ts"的同步义务，守卫是 `validate.test.ts` 的"默认配置通过校验且字段完整保留"（此例此前已存在，现补注释点明其守卫作用）。**已核查排除**：loadConfig 返回值与 flags 入参不共享子对象引用，此前担心的 deepFreeze 污染不成立。**（2026-10-17 更正：该结论只对纯对象合并成立；`plugins` 是数组整值替换、且 `validateConfig` 原样透传 `plugins[].config`，这条路径确实共享引用，已由本次评审 01-Y2 修复并补集成回归）**
 
 **02 交付实况（2026-10-17）**：门禁全绿（typecheck / lint / **168 例** = 01 的 114 + 02 单测 49 + 02 集成 5）；`src/llm/` **628 行**（sse 110 / wire 174 / adapter 171 / accumulate 59 / plugin 58 / types 33 / index 23），另在 `src/errors.ts` 增 `LlmError` 约 48 行（属 M0 文件，单独计）——合计约 0.68k，低于 ~1.5k 预算（理由记入设计 §7 预算说明）。单测分布：sse 13 / wire 13 / adapter 13 / accumulate 6 / plugin 4；集成 4 链路 5 例（注册解析 / 流式+工具调用聚合 / 取消 / API key 缺失），**全程不打网络**（伪 fetch + 真实 `Response`/`ReadableStream` + 真实 boot）。实现期偏离 **X1–X3** 已补记 §7：X1 额外导出 `PROVIDER_DEEPSEEK`（避免 provider 名字面量在注册处与断言处漂移）；X2 `plugin.ts` 的 `registerBuiltin` 直接从 `../plugin/boot.js` 引入（绕 `src/index.ts` 会形成 index → llm → index 循环）；X3 取消路径**不断言** `reader.cancel()`（流已 errored 时 cancel 按规范是 no-op，连接由 fetch 的 signal 销毁），"关流"改由"提前 break"用例断言。另有一处实测修正：集成链路 1 的 `plugin/mounted` 名单含探针自身（`llm-probe`），与 M0 语义一致（监听器在 setup 内注册，会收到自身挂载广播），已在用例注释点明。
 
@@ -52,6 +55,15 @@
 
 **04 交付实况（2026-10-17）**：门禁全绿（typecheck / lint / **276 例** = 03 的 239 + 04 单测 29 + 容器回归 3 + 04 集成 5）；`src/prompt/` **491 行**（plugin 106 / environment 95 / core 70 / types 51 / tool-use 45 / identity 37 / guidelines 36 / order 28 / index 23；Y1 修复 +2 行），预算 ~0.5k 的区间（400–600）内——与 02/03 不同，本模块**不显著低于预算**，因为文案是实体内容压不掉。单测分布：order 2 / identity 2 / guidelines 2 / tool-use 4 / environment 8 / core 4 / plugin 7；集成 5 链路 5 例（挂载与排序 / 可扩展 / **未挂载返回空串** / 条件+惰性 / 禁用），**零 IO 故无 fixture 目录**。实现期偏离 **X1–X4** 已补记 §7：X1 `PromptPluginOptions` 改 type 别名（lint 禁空接口）；X2 `PROMPT_ORDER` 补 `guidelines: 800`（设计常量表漏列，否则 05/08 会误占该 order）；X3 `safeCwd(read?)` 抽出可注入（"cwd 被删"无法在单测里真复现）；X4 容器回归补 3 例（多出的两例是"空白但非空不过滤"与"段抛错上抛不吞"）。自检评审（读码 + 1 轮 7 例探针）**未发现 P0/P1**，登记 4 项**探针证伪的误报**（render 性能 5000 次 336ms / 挂两次的错误形态可读 / 两次 render 相等是同秒巧合 / 默认路径无连续空行）。另在 `00-skeleton.md` §3 补记一行：`PromptRegistry.render()` 自 04 起**跳过空串段**（实现行为调整，非签名变更）。实测 `src/` 全量非测试代码 **3800 行**（模块口径合计 **3643** = 3154 + 489，差额 157 为 M0 顶层文件增量）。**复核评审（2026-10-17 晚，读码 + 1 轮 8 例探针）**：自检的 4 项误报结论逐项重测全部维持；坐实并修复 1 个 P3 —— **Y1**：实例配置误传数组（`typeof [] === 'object'`）时 `disabled` 被静默忽略，改为 `Array.isArray` 一并抛 `'must be an object'`（断言补进既有用例，门禁仍 **276 例**全绿）；证伪"invalid Date 渲染 NaN"（非真实输入面）。已回写 `04-prompt.md` §7。
 
+**05 交付实况（2026-10-18）**：门禁全绿（typecheck / lint / **418 例** = 296 + 05 单测 115 + 05 集成 7）；`src/tools/` **1844 行**（pipeline 440 / bash 209 / schema 200 / fs-walk 157 / plugin 139 / read 116 / grep 114 / edit 97 / types 70 / glob 70 / write 52 / section 51 / path 50 / fs-error 38 / index 27 / projection 14）——低于 ~2.5k 预算 27%，理由记入 `05-tools.md` §7（六工具比预估薄、fs-walk 共用、无沙箱/PTY/重试等产品化工程）。单测分布：pipeline 32 / schema 20 / read 9 / plugin 9 / glob 7 / grep 7 / bash 7 / path 6 / edit 6 / section 5 / write 4 / projection 3；集成 6 链路 7 例（挂载与段排序 / **端到端入 log 并可投影** / deny 不执行不审批 / **ask 无审批通道失败关闭** / 瀑布改写作用于执行对象 / 未挂载 / 09 预演的动态注册），真实 fs + 真实 session 落盘，fixture 用 tmp 目录（`mdsh-tools-it-*` / `mdsh-tools-sessions-*`）。实现期偏离 **X1–X6** 已补记 §7：X1 `*.ts` 按 basename 匹配（与 ripgrep `-g` 一致，grep 的 glob 过滤需要）；X2 新增 `fs-error.ts`（四处共用）；X3 快照身份字段（`callId`/`sessionId`/`turnNo`/`stepNo`）由 pipeline 持有，监听器只能改 name/args；X4 `resolvePath` 经 `src/index.ts` 转发给 08；X5 `edit` 内再兜空 `oldString`（防绕过 pipeline 时 `indexOf('')` 死循环）；X6 单测 115 例（预估 ~95，多出的是探针转正）。自检评审（读码 + 7 例临时探针）**无 P0/P1**，坐实并修复 **Y1**（post-execute 丢掉 `error` 时保留原错误码，否则 07 分不清参数错与执行错），另登记 4 项**探针证伪的误报**（忽略 abort 的工具最多 2s 收尸 / 改冻结快照被当拒绝 / start-end 成对 / `**` 允许零层）。实测 `src/` 全量非测试 **5982 行**（较 04 交付时的 4123 增 1859 = `src/tools/` 1844 + `src/index.ts` 的转发与注释 15；`contracts.ts` / `errors.ts` 未改）。**所有者 review（2026-10-18 第二轮，读码 + 实证）**：门禁复跑全绿；修复 Y2–Y4（schema 子集收敛 / taskkill error 监听 / bash 取消用例超时硬化）并订正文档三处漂移，已回写 `05-tools.md` §7；DoD 末条"所有者已 review 代码"已勾。
+
+**跨模块攻击式评审实况（2026-10-17 晚，针对 `docs/ATTACK_REVIEW_2026-10-17.md`）**：该报告列出 17 条 F 级发现（F-01–F-17）与 3 条策略边界（PB-01–03），并声明"未运行测试或动态探针"。按本项目 02 起确立的评审方式（读码 + 临时探针实证，跑完即删），逐条复验：**14 条已改**（F-01/04/05/06/07/08/09/10/11/12/13/14/17 共 13 条由探针实证为运行时缺陷；F-15 是工具输出信任边界文案，属加固而非缺陷），**F-02/F-03/F-16 三条不改代码**（信任模型选择，登记遗留表），PB-01–03 为策略边界、另立。
+
+- **已修（按模块续 Y 编号，已回写各设计文档 §7）**：`00-skeleton` **Y1–Y5**（退订句柄按注册身份删除 / `shutdown` 单飞 / async 监听器 rejection 捕获 / `PromptRegistry` 注册校验+冻结副本 / 两处契约 JSDoc 澄清）；`01-config` **Y1–Y2**（权限键首尾空白拒绝 / `plugins[].config` 深拷贝）；`02-llm` **Y5**（SSE 跨分片 CRLF）；`03-session` **Y2–Y8**（id 路径穿越 / `create` 原子化 / `list` 用存储键 / `append` 快照 / 退订 token / async 订阅者 rejection / 投影顺序配对）；`04-prompt` **Y2–Y3**（环境段动态值单行化 / 工具输出信任边界文案）。
+- **实证要点**：F-01 探针真的把会话读出了 sessions 根目录；F-08 并发 `create` 在 50 轮里复现 6 次两条 header；F-05 重复 `call_0` 会投影出"有 tool_calls 无 tool 消息"的 assistant；F-11 `boot()` 真的把 `flags.plugins[].config` 冻住了；F-06/F-07/F-09/F-10/F-12/F-13/F-14/F-17 均按报告描述复现。**F-08 首轮单次探针未复现**（Windows 上 `fs.access` 的完成顺序偶然错开），改用 50 轮循环才稳定复现——这类时序缺陷不能靠"跑一次没出事"证伪。
+- **不修（信任模型/策略边界，需 05/07 拍板）**：F-02 项目配置可加载任意本地 JS 插件、F-03 项目配置可把任意环境变量当 Bearer 外发、F-16 核心 prompt 段可整体缺席或被禁用、PB-01 全局 `deny` 不是项目配置的强制上限、PB-02 权限选择器尚无运行时执行门、PB-03 prompt 只是软约束。另两条 P3（HTTP 错误体全量读入、usage/index 只查有限数值）经复核属设计取舍，**不改**，理由已写入 `02-llm.md` §7。
+- **门禁**：typecheck / lint / **296 例**（276 + 新增 20 例回归）全绿。LOC 实绩：`src/config` 460（+40）、`src/llm` 677（+30）、`src/session` 1070（+140）、`src/prompt` 515（+24）、`src/plugin` 699（+82），`src/` 全量非测试 **4123 行**（M0 口径 1401，仍在上限 1440 内）；各模块均在预算区间内。
+
 **02 review 修复实况（2026-10-17，攻击式评审后回写，门禁 174 例全绿）**：评审方式为"读码 + 实证"——除逐行审查外，另写 3 轮共 **19 例临时探针**验证可疑点（探针跑完即删，不入库），**未发现 P0**。修复 **Y1–Y4**（编号 Y 区别于实现期的 X）：①**Y1（P1）`[DONE]` 哨兵不容错**——`parseBlock` 只剥离冒号后一个空格且比对前未 trim，`data: [DONE] `（尾随空格）与 `data:  [DONE]`（多空格，SSE 规范允许）都不被识别，落入 `JSON.parse` 抛 `protocol`，**而失败发生在流末、模型输出已产出、token 已消耗**，整个回合却被判失败；修复为比对前 trim。②**Y2（P2）`flush()` 路径的 `[DONE]` 不置 `#done`**——`#drain` 的 `final` 分支漏了置位，与 push 路径及类 JSDoc"其后一切输入都丢弃"矛盾。③**Y3（P2）非对象 SSE 帧中断整条流**——网关的 `data: null` 空闲帧被判"不是对象"而抛 `protocol`；容忍层放在 adapter 的 `frameEvents`（编排层），`toStreamEvents` 保持线格式映射的严格语义不变，故既有测试无需改动。④**Y4（P2）请求构造错误被误分类为 `network`**——`buildRequestBody` 在 `try` 内，契约外畸形请求的 `TypeError` 被包装成 `LlmError{kind:'network'}`，07 会把本地 bug 提示成"网络故障"；修复为把构造移到 `try` 之外。新增 **6 例**回归测试（sse 3 / adapter 3），单测分布更新为 sse 16 / wire 13 / adapter 16 / accumulate 6 / plugin 4；`src/llm/` 628 → **647 行**（增量全部来自容错分支与其注释）。另登记两项**不改**：**U1**（`finally` 中 `await reader.cancel()`，偏离设计 §4.1 伪代码的 `void ...`，但等待 cancel 完成使"提前 break"用例能确定性断言，理由充分）；**P2-4**（HTTP 错误体先 `await response.text()` 全量读入再截断 500，与设计 §4.1 伪代码一致，属设计取舍）。**评审排除的误报 4 项**（探针证伪，已记入设计 §7 以免后续重复怀疑）：消费者在 `for await` 体内抛错不会被 catch 误包装（错误原样冒泡）；SSE 无 O(n²) 性能问题（8000 帧 / 1.1MB 单 chunk 仅 4.7ms）；`data:   x` 保留多余空格符合 RFC 8895；`LlmError` 的 instanceof 正常（target/lib = ES2022）。
 
 ## 模块进度总表
@@ -60,19 +72,19 @@
 
 | # | 模块 | 需求 | 设计文档 | package | 单测 | 集成测试 | Review | Commit | 预算 | 实绩 |
 |---|---|---|---|---|---|---|---|---|---:|---:|
-| 00 | skeleton（M0） | ✓ | ✓ Baseline | ✓ 1157 行 | ✓ 45 例 | ✓ 4 链路 | ✓ | ✓ | ~1.2k | 1157 |
-| 01 | config | ✓ | ✓ Baseline | ✓ 420 行 | ✓ 58 例 | ✓ 8 例 / 4 链路 | ✓ | ✓ `4e97e17` | ~0.4k | 420 |
-| 02 | llm | ✓ | ✓ Baseline | ✓ 647 行 | ✓ 55 例 | ✓ 5 例 / 4 链路 | ✓ | ✓ `871bd91` | ~1.5k | 647 |
-| 03 | session | ✓ | ✓ Baseline | ✓ 930 行 | ✓ 58 例 | ✓ 7 例 / 5 链路 | ✓ | ✓ | ~1.5k | 930 |
-| 04 | prompt | ✓ | ✓ Baseline | ✓ 491 行 | ✓ 29 例 | ✓ 5 例 / 5 链路 | ✓ | ✓ `815bd51` | ~0.5k | 491 |
-| 05 | tools | — | — | — | — | — | — | — | ~2.5k | — |
+| 00 | skeleton（M0） | ✓ | ✓ Baseline | ✓ 1401 行 | ✓ 54 例 | ✓ 4 链路 | ✓ | ✓ | ~1.2k | 1401 |
+| 01 | config | ✓ | ✓ Baseline | ✓ 460 行 | ✓ 59 例 | ✓ 8 例 / 4 链路 | ✓ | ✓ `4e97e17` | ~0.4k | 460 |
+| 02 | llm | ✓ | ✓ Baseline | ✓ 677 行 | ✓ 57 例 | ✓ 5 例 / 4 链路 | ✓ | ✓ `871bd91` | ~1.5k | 677 |
+| 03 | session | ✓ | ✓ Baseline | ✓ 1070 行 | ✓ 66 例 | ✓ 7 例 / 5 链路 | ✓ | ✓ | ~1.5k | 1070 |
+| 04 | prompt | ✓ | ✓ Baseline | ✓ 515 行 | ✓ 30 例 | ✓ 5 例 / 5 链路 | ✓ | ✓ `815bd51` | ~0.5k | 515 |
+| 05 | tools | ✓ | ✓ Reviewed | ✓ 1844 行 | ✓ 115 例 | ✓ 7 例 / 6 链路 | ✓（Y1–Y4 已修，待提交） | — | ~2.5k | 1844 |
 | 06 | agent | — | — | — | — | — | — | — | ~2.0k | — |
 | 07 | cli | — | — | — | — | — | — | — | ~1.0k | — |
 | 08 | plugin-memory | — | — | — | — | — | — | — | ~0.2k | — |
 | 09 | plugin-mcp | — | — | — | — | — | — | — | ~0.7k | — |
-| | **合计** | | | | | | | | **~11.5k** | **3645** |
+| | **合计** | | | | | | | | **~11.5k** | **5982** |
 
-（目标 ~10k，硬上限 20k；统计口径见 `process.md` §6，排除测试代码）
+（目标 ~10k，硬上限 20k；统计口径见 `process.md` §6，排除测试代码。**2026-10-17 评审后**：M0 口径从 1157 增至 1401（内核 Y1–Y5 的修复与注释），01/02/03/04 分别 +40 / +30 / +140 / +24；单测数含本次新增的 20 例回归。**2026-10-18 加入 05**：`src/tools/` 1844，全量 5982）
 
 ## 关键文档状态
 
@@ -85,6 +97,7 @@
 | `docs/design/03-session.md` | **Baseline** · 2026-10-17 | 03 设计：`builtin:session` 插件 + JSONL append-only 存储（`src/session/` 八文件）+ `deriveMessages` 纯函数投影 + `SessionError`。要点：store 与插件分离（D3）、sessions 目录走 `plugins[].config` 不加 Config 字段（D4）、`list()` 只读首事件（D7）、投影裁剪残缺 toolCalls 与孤立 tool 结果（D8）、`subscribe` 未知 id 抛错（D9）。差异 D1–D9 见 §2.4；**§8 的 Q1–Q10 已于 2026-10-17 全部按建议项拍板**，Q1 的基线修订（0.1.5）已执行；**实现已完成（③④⑤ 全绿，239 例）**，实现期偏离 X1–X2、review 期修复 Y1（P1）与"评审排除的误报"表已回写 §7；**已于 2026-10-17 随模块提交归档为 Baseline** |
 | `docs/design/04-prompt.md` | **Baseline** · 2026-10-17 | 04 设计：`builtin:prompt` 内容插件 + `src/prompt/` 九文件。要点：**容器在 M0 已是最终实现，04 只注册段不 mount**（D1，未挂时 `render()` 返回 `''` 而非 `'not mounted'`）、四段（identity 100 / environment 200 动态 / tool-use 300 条件 / guidelines 800）、段内容与插件分离（`createCoreSections` 纯函数 + getter 注入，D3/D5）、导出 `PROMPT_ORDER` 常量表并给 05 预留 `tools: 350`、08 预留 `memory: 900`（D6）、tool-use 不列工具名（D7）、不做项目指令文件（D8）。差异 D1–D8 见 §2.4；Q1–Q10 已全部拍板；实现期偏离 X1–X4、复核评审修复 **Y1**（实例配置拒数组）与误报表已回写 §7；**已随模块提交归档** |
 | `docs/design/02-llm.md` | **Baseline** · 2026-10-17 | 02 设计：`builtin:llm` 插件 + 手写 SSE 的 OpenAI 兼容流式 adapter（`src/llm/` 六文件）+ `LlmError` + `createToolCallAccumulator`。要点：只注册 `deepseek`（Q1）、错误以 `LlmError{kind}` 抛出（Q2，StreamEvent 表封闭不能加 error 变体）、聚合助手归 02（Q3）、`registerLlmBuiltin()` + `createLlmPlugin({fetchImpl})` 显式注册与注入（Q4）、`stream()` 配置类错误同步抛（D4）、不重试（D5）、不在 setup 自检 provider（D7）。差异 D1–D7 见 §2.4；**Q1–Q7 已于 2026-10-17 全部拍板（均按建议项）**，实现已完成（③④⑤ 全绿），实现期偏离 X1–X3 已补记 §7；**review 已完成（攻击式评审，3 轮探针 19 例实证、无 P0），review 期修复 Y1–Y4 与"排除的误报"表已回写 §7，文档随模块提交归档为 Baseline** |
+| `docs/design/05-tools.md` | **Baseline** · 2026-10-18 | 05 设计：`builtin:tools` 插件 + `src/tools/` 十六文件（pipeline / schema / path / fs-error / fs-walk / projection / section / plugin / types / index + 六内置工具）。要点：**pipeline 以导出函数交付**（D1，`ToolRegistry` 签名封闭不能加 `run`）、**权限门在 `tools/pre-execute` 之后对冻结快照执行**（D2，PB-02 ③④）、六工具纯函数与插件分离（D3）、`tools` 段惰性查 `ctx.tools.list()`（D4）、`post-execute` 抛错保留原结果（D5）、路径基准 `process.cwd()`（D6）、64k 中段截断（D8）。Q1–Q10 已全部拍板；实现期偏离 X1–X6、评审期修复 **Y1–Y4**（Y1 post-execute 丢 error 保原码；Y2 schema 子集收敛回 §3.1；Y3 taskkill spawn 补 error 监听；Y4 bash 取消用例超时硬化）与"评审排除的误报"表已回写 §7 |
 
 ## 遗留与阻塞
 
@@ -109,6 +122,12 @@
 | — | **系统提示每 step 都变**（环境段的秒级时间戳） | **已知取舍，不改**：会削弱 provider 侧前缀缓存命中；但模型需要真实时间处理"刚才/今天"，且 mini 版不统计缓存（02 非目标）。日后要优化就把时间行挪到最后一个段 | 04（记录）→ 06/07 |
 | — | **provider 不认 `stream_options`**（少数 OpenAI 兼容网关会对未知字段报 400） | **已知风险，不处理**：02 按 `{kind:'http', status:400}` 上抛，不降级重试（02 §5 边界表 / Q5）。用户侧解法是换 baseUrl 或等后续加兼容开关 | 02（记录）→ 07 错误提示 |
 | — | **03 的插件配置 narrow 不拒数组**：`session/plugin.ts` 与 04 修复前的同式写法——`config` 误传数组时 `typeof [] === 'object'` 放行、配置被静默忽略（04 已修为 Y1，03 已归档 Baseline 不回改） | **已定，不修**：实例配置来源是 `loadConfig()` 校验过的 JSON，数组形态属用户手写错误且影响仅是"配置不生效"；若 09 或后续插件再写 narrow，直接沿用 04 Y1 的 `Array.isArray` 防线 | 后续插件作者 |
+| F-02 | **项目配置可加载任意本地 Node 插件代码**：`loadConfig()` 默认读 cwd 的 `minidsh.json`，`source` 非 `builtin:` 时按 cwd `import()`，无沙箱 | **信任模型，不修代码**：不是"插件加载"本身的缺陷，而是"项目配置自动生效"这一策略选择。07 必须在首次加载项目级（非 `builtin:`）插件时给出**显式信任确认**，或提供"项目配置只允许 builtin"的开关；文档不得把项目配置描述成纯数据 | 07 |
+| F-03 | **项目配置可把任意环境变量作为 Bearer 发往任意 URL**：`model.apiKeyEnv` 与 `model.baseUrl` 都可由项目层覆盖 | **信任模型，不修代码**（cwd 可信时无风险）。07 的信任提示须覆盖"项目配置能改凭据来源与 endpoint"；远程 endpoint 默认要求 HTTPS，`http://localhost` 作为受信例外（02 记录） | 07（提示）/ 02（记录） |
+| F-16 | **核心 prompt 段可整体缺席或被配置禁用**：默认 `plugins` 为空、`builtin:prompt` 未挂时 `render()` 回空串，且允许禁用 `core/tool-use` 等段 | **策略边界，不修**：这是设计允许的行为。①07 的默认 plugins 必须含 `builtin:prompt`（与"默认 plugins 非空"同一 DoD）；②任何安全语义都不得依赖 prompt 段存在——硬边界由 05 的权限门强制 | 07 / 05 |
+| PB-01 | 全局 `deny` 不是项目配置的强制上限（"更具体规则总是赢"，架构 2026-10-16 已采纳） | **已定，文档化**：全局配置 = 默认值，不承担组织级强制策略；若日后需要企业策略，另加不可被放宽的 ceiling 机制，不在 mini 版范围 | 架构（记录） |
+| PB-02 | `resolvePermission` 只是选择器，**尚无运行时执行门**（`tools` 未实现） | **05 的四条硬性 DoD**：①`deny` 不展示审批、不调用工具，但仍写 `tool/result`；②`ask` 在无审批处理器/超时/用户拒绝时**失败关闭**，绝不降级为 `auto`；③授权对象是 `tools/pre-execute` 等改写**全部完成后的同一不可变快照**（禁止"检查 A、执行 B"）；④schema 校验、权限检查、registry lookup、执行绑定同一 invocation | 05 |
+| PB-03 | prompt 只是**软约束**，工具输出可能含提示注入 | **已定**：授权、拒绝、路径限制、参数校验一律在 05 的执行代码里强制；prompt 文案（04 Y3）只做提示，不作为边界 | 05 |
 
 ## 约定备忘（跨会话不变）
 

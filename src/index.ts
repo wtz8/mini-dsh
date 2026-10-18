@@ -14,6 +14,11 @@
  * - `PROMPT_ORDER`：prompt section 的 order 区间约定（04 提供、05/08 消费：order 是
  *   跨插件共享的排序资源，各模块写字面量必然漂移）；
  * - `createCoreSections`：内置 prompt 段组装（04 提供、07 消费：做"精简模式"时复用）；
+ * - `createToolRunner`：guarded tool pipeline（05 提供、06 消费：每 step 驱动工具调用，
+ *   返回的 `ToolResult` 已入 log；**永不抛错**）；
+ * - `toToolSchemas`：工具定义 → `LLMRequest.tools` 的模型可见面投影（05 提供、06 消费）；
+ * - `resolvePath`：相对路径解析基准（05 提供、08 消费：写 MEMORY 文件时复用，避免与
+ *   04 环境段的"工作目录"承诺漂移）；
  * - 运行时错误类 `ToolRejected` / `BootError` / `ConfigError` / `LlmError` / `SessionError`
  *   （01 起新增配置错误类，02 起新增 LLM 调用错误类，03 起新增会话存储错误类）。
  *
@@ -33,5 +38,15 @@ export { deriveMessages } from './session/derive.js'
 /** 04 的插件侧能力：order 区间约定（05 用 `tools`、08 用 `memory`）与内置段组装 */
 export { PROMPT_ORDER } from './prompt/order.js'
 export { CORE_SECTION_IDS, createCoreSections } from './prompt/core.js'
+/** 05 的插件侧能力：06 每 step 用它执行工具（guarded pipeline）并把工具投影进请求 */
+export { createToolRunner, toToolSchemas } from './tools/index.js'
+/** 05 的路径基准（D6）：相对路径按 `process.cwd()` 解析、`~` 展开——08 写 MEMORY 文件时复用，不要自己拼 */
+export { resolvePath } from './tools/path.js'
+export type {
+  ApproveHandler,
+  ToolRunContext,
+  ToolRunner,
+  ToolRunnerOptions,
+} from './tools/types.js'
 export { ToolRejected, BootError, ConfigError, LlmError, SessionError } from './errors.js'
 export type { LlmErrorKind, SessionErrorKind } from './errors.js'

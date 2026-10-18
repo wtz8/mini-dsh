@@ -40,6 +40,8 @@ export { PROMPT_ORDER } from './prompt/order.js'
 export { CORE_SECTION_IDS, createCoreSections } from './prompt/core.js'
 /** 05 的插件侧能力：06 每 step 用它执行工具（guarded pipeline）并把工具投影进请求 */
 export { createToolRunner, toToolSchemas } from './tools/index.js'
+/** 05 的 bash 超时解析工厂（06 在 setup 内接线 `timeoutFor`，不必知道配置字段名） */
+export { createBashTimeoutResolver } from './tools/plugin.js'
 /** 05 的路径基准（D6）：相对路径按 `process.cwd()` 解析、`~` 展开——08 写 MEMORY 文件时复用，不要自己拼 */
 export { resolvePath } from './tools/path.js'
 export type {

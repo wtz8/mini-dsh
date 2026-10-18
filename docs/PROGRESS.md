@@ -5,9 +5,10 @@
 
 ## 下一步动作（下一个会话从这里开始）
 
-**当前焦点：06-agent 已通过所有者 review（2026-10-18 晚，Y1–Y2 已修复并回写设计文档 §7），`06-agent.md` 已转 Baseline；等用户确认后提交，然后开 07-cli**
+**当前焦点：06-agent 已交付提交（`ec8f933`，2026-10-18）；开 07-cli 时先读 `AGENT.md` → 本文件 → `06-agent.md`（Baseline，重点 §8 附则"与 07 的职责边界"）→ `architecture.md` §5.2 取消边界**
 
-- [ ] **第一件事（下一会话）：06 提交 + 开 07** —— ①先展示变更摘要、用户确认后按 conventional commits 提交（范围：`src/agent/` 七文件 1124 行 + 单测 60 例 + `tests/integration/agent.test.ts` 7 链路 + `docs/design/06-agent.md` 转 Baseline + 本文件）；②再开新对话走 07-cli 七步流程，开场读 `AGENT.md` → 本文件 → `06-agent.md`（Baseline，重点 §8 附则"与 07 的职责边界"）→ `architecture.md` §5.2 取消边界
+- [x] ~~**第一件事（下一会话）：06 提交 + 开 07** —— ①先展示变更摘要、用户确认后按 conventional commits 提交（范围：`src/agent/` 七文件 1124 行 + 单测 60 例 + `tests/integration/agent.test.ts` 7 链路 + `docs/design/06-agent.md` 转 Baseline + 本文件）；②再开新对话走 07-cli 七步流程，开场读 `AGENT.md` → 本文件 → `06-agent.md`（Baseline，重点 §8 附则"与 07 的职责边界"）→ `architecture.md` §5.2 取消边界~~ → **已完成**（2026-10-18：`ec8f933`，16 文件 +3468/−7，门禁 485 例全绿）
+- [ ] **第二件事（下一会话）**：开新对话走 07-cli 七步流程，开场读 `AGENT.md` → 本文件 → `06-agent.md`
 - [x] **06 所有者 review 已完成**（2026-10-18 晚，读码全量 + 门禁复跑 + 6 例临时探针实证）：坐实并修复 **Y1（P2）压缩请求的用量被丢弃** —— 设计 §8-Q8 拍板"压缩用量计入 `totalUsage`"，但 §4.6 伪代码漏了取用量，实现照伪代码写，实测摘要 `{100,20}` + 回复 `{5,5}` 只报 `{5,5}`；改为 `compactSession` 返回 `CompactOutcome{compacted, usage}`（用量盒子在流内累积，失败也回传部分用量），`loop.ts` 无条件累加，补 3 例回归（compact 19b/19c、loop 31b）。另订正 **Y2** 三处注释/JSDoc 与实现不符（`AgentControlHandle` 的偏离号 X2→X5、`schedule.ts` 屏障注释与 X4 冲突、`run()` 上方悬空的重复 JSDoc 块）+ 删一处冗余类型断言。4 项误报经探针证伪（监听器抛错不影响回合 / LLM 抛错后 `current` 正常清空 / dispose 不上抛回合错误 / 压缩请求缺 `system` 不炸）。`06-agent.md` 状态 Reviewed → **Baseline**，门禁 **485 例**全绿
 - [x] **06 设计已拍板**（2026-10-18）：所有者拍板 **Q1–Q13 全部按建议项**；`06-agent.md` Draft → **Reviewed**
 - [x] **06 实现与测试完成**（2026-10-18）：`src/agent/` **1087 行**（loop 305 / compact 257 / plugin 169 / types 144 / tokens 104 / schedule 102 / index 29）；单测 **57 例**（tokens 13 / schedule 10 / compact 13 / loop 14 / plugin 7）；集成 **7 例 / 7 链路**（纯问答 / 工具调用 / 并发与独占 / 取消 / 压缩 / resume / 审批失败关闭与放行）；门禁 **419 → 483 例**全绿（typecheck / lint / test）
@@ -88,7 +89,7 @@
 | 03 | session | ✓ | ✓ Baseline | ✓ 1070 行 | ✓ 66 例 | ✓ 7 例 / 5 链路 | ✓ | ✓ | ~1.5k | 1070 |
 | 04 | prompt | ✓ | ✓ Baseline | ✓ 515 行 | ✓ 30 例 | ✓ 5 例 / 5 链路 | ✓ | ✓ `815bd51` | ~0.5k | 515 |
 | 05 | tools | ✓ | ✓ Baseline | ✓ 1844 行 | ✓ 115 例 | ✓ 7 例 / 6 链路 | ✓（Y1–Y4 已修） | ✓ `9059397` | ~2.5k | 1844 |
-| 06 | agent | ✓ | ✓ **Baseline**（Q1–Q13 已拍板） | ✓ 1124 行 | ✓ 60 例 | ✓ 7 例 / 7 链路 | ✓（Y1–Y2 已修） | — 待提交 | ~2.0k | 1124 |
+| 06 | agent | ✓ | ✓ **Baseline**（Q1–Q13 已拍板） | ✓ 1124 行 | ✓ 60 例 | ✓ 7 例 / 7 链路 | ✓（Y1–Y2 已修） | ✓ `ec8f933` | ~2.0k | 1124 |
 | 07 | cli | — | — | — | — | — | — | — | ~1.0k | — |
 | 08 | plugin-memory | — | — | — | — | — | — | — | ~0.2k | — |
 | 09 | plugin-mcp | — | — | — | — | — | — | — | ~0.7k | — |

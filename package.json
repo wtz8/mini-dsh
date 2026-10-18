@@ -9,6 +9,9 @@
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
+  "bin": {
+    "mdsh": "bin/mdsh.js"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

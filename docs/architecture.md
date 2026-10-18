@@ -1,7 +1,7 @@
 # MiniDSH 骨架设计
 
 > 状态：Reviewed（2026-10-16 所有者拍板 Q1–Q6，可进入 M0 模块设计）
-> 版本：0.1.5（修订记录见 §12）
+> 版本：0.1.7（修订记录见 §12）
 > 参考实现：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) `86a402200d`
 
 ## 1. 项目定位
@@ -143,9 +143,12 @@ interface SessionStore  { create(opts: SessionInit): Promise<Session>
                           subscribe(sessionId: string, fn: (e: SessionEvent) => void): Unsubscribe }
 interface AgentRegistry  { register(ctl: AgentControl): void
                           resolve(): AgentControl }              // 未注册时 resolve 抛 'not mounted'
-interface AgentControl  { run(input: UserInput): Promise<TurnSummary>
+interface AgentControl  { readonly sessionId: string            // 本控制面绑定的会话 id（0.1.7 新增，见下方说明）
+                          run(input: UserInput): Promise<TurnSummary>
                           cancel(reason?: string): void }        // 取消当前回合，见 §5.2 取消信号边界
 ```
+
+**`AgentControl.sessionId`（0.1.7 新增）**：会话由 06 的 `builtin:agent-loop` 在 `setup()` 内 create/open（06 §8-Q1），因此 `session/header` 事件在 `boot()` 期间即写完——订阅方（07 的渲染层）挂载于 boot 之后，**永远收不到它**。若没有这个出口，"当前会话 id"只能靠 `sessions.list()` 推定最新一条，存在同毫秒 `createdAt` 下取错的边界。故在控制面上显式声明该字段：07 用它显示与 resume，08/09 的插件（按会话存放记忆等）也不必自己猜。
 
 adapter 解析约定：06 模块调用 `ctx.llm.resolve(config.model.provider)` 获取 adapter 工厂——resolve 的 name 即 provider 名，默认值不另设字段；未知 provider 由 `resolve` 抛错，启动时（或首次回合时）fail-fast。
 
@@ -382,6 +385,7 @@ mini-dsh/
 
 | 版本 | 修订内容 |
 |---|---|
+| 0.1.7 | §5.2 给 `AgentControl` **新增** `readonly sessionId: string`（**跳过 0.1.6**：该号此前被 PROGRESS 预告给"权限 X4 反转（全局优先）"方案，该方案经所有者否决后未落地、记录已删除，故不再复用此号以免版本史混淆）（07 评审期 Y4，所有者 2026-10-18 拍板）：会话由 06 的 `builtin:agent-loop` 在 `setup()` 内 create/open，`session/header` 事件在 `boot()` 期间即写完，订阅方（07 的渲染层）挂载于 boot 之后**永远收不到它**。缺此出口时"当前会话 id"只能靠 `sessions.list()` 推定最新一条，在两次启动落在同一毫秒 `createdAt` 时会取错（07 X2/Y1 的残留边界）。06 的控制面闭包本就持有该 id，只需带出，属纯新增字段、不改动任何既有签名；同步落点：`src/contracts.ts`、`src/agent/loop.ts`（handle 带出）、`src/plugin/containers.test.ts`（字面量补字段）。对 08/09 同样有用：插件要知道"当前会话"时不必自己猜 |
 | 0.1.0-draft | 初稿：定位、模块分解、骨架契约（§5）、对照表与开放问题 |
 | 0.1.1-draft | 系统提示入口收敛为 `PromptRegistry.render()` 唯一出口；瀑布事件的注册 API 定为 `onWaterfall`；agent 装配语义明确为“容器对象引用恒定、插件只注册不替换”；LOC 统计口径（排除测试、逐模块预算） |
 | 0.1.2-draft | §5.4 补工具契约（`ToolDefinition` / `ToolInvocation` / `ToolResult` / `ToolErrorCode`）及其 pipeline 产出约定 —— 因工具定义同时被 04 与 06 消费，属跨模块词汇；§5.5 明确 config 非插件、由宿主在 boot 前冻结注入；§11 增补 Q6（permissions 通配符匹配规则）；新增本节作为修订落点 |

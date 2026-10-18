@@ -206,7 +206,11 @@ describe('AgentRegistry', () => {
 
   it('register 后 resolve 返回同一控制面；重复注册抛错', () => {
     const reg = new AgentRegistryImpl()
-    const ctl: AgentControl = { run: async () => ({ turnNo: 1, stepCount: 0, totalUsage: { inputTokens: 0, outputTokens: 0 }, interrupted: false }), cancel: () => {} }
+    const ctl: AgentControl = {
+      sessionId: 's1',
+      run: async () => ({ turnNo: 1, stepCount: 0, totalUsage: { inputTokens: 0, outputTokens: 0 }, interrupted: false }),
+      cancel: () => {},
+    }
     reg.register(ctl)
     expect(reg.resolve()).toBe(ctl)
     expect(() => reg.register(ctl)).toThrow(/already registered/)

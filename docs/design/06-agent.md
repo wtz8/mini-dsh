@@ -581,6 +581,8 @@ dispose():
 |---|---|---|
 | Y1 | **压缩请求的用量计入 `TurnSummary.totalUsage`**（`compactSession` 返回值由 `boolean` 改为 `CompactOutcome{compacted, usage}`） | 设计 §8-Q8 拍板"压缩请求的用量也计入 totalUsage（真实花销）"，但 §4.6 伪代码写的是 `const { text } = await collectSilent(...)`——用量被丢弃，实现照伪代码写，**两处自相矛盾**。探针实测：摘要请求 `usage{100,20}` + 回合回复 `{5,5}`，`totalUsage` 只报 `{5,5}`。按 Q8（owner 拍板项）为准改实现：用"用量盒子"在流消费内累积，**失败时已送达的部分用量也要回传**，`loop.ts` 无条件累加。影响：`compactSession` 返回类型变化（新增导出 `CompactOutcome`），无下游消费者。已补 3 例回归（compact 19b/19c、loop 31b） |
 | Y2 | 三处注释/JSDoc 与实现不符的订正（无行为变更） | ①`types.ts` 与 `loop.ts` 的 `AgentControlHandle` 说明把偏离号写成 **X2**（压缩切点），实为 **X5**；②`schedule.ts` "屏障 1"注释写"可能抛出前面调用的错误"，X4 改成"收集后收尾上抛"后已不成立；③`loop.ts` 的 `run()` 上方有两个连续的 JSDoc 块（前一个悬空），合并为一个。另删 `tokens.ts` 一处冗余类型断言 |
+| Y3 | **控制面带出 `sessionId`（`AgentControl` 新增 `readonly sessionId: string`）** ——Baseline 后修订，源自 07 评审期 Y4，架构文档同步至 **0.1.7** | 会话在本插件 `setup()` 内 create/open（§8-Q1），`session/header` 因此在 `boot()` 期间就写完，07 的渲染订阅挂载于 boot 之后**永远收不到**——07 的 `/session` 与横幅一度只能显示 `unknown`（07 X2）。此后 07 退化为"从 `sessions.list()` 推定最新一条"，残留同毫秒 `createdAt` 取错的边界（07 Y1）。本插件的闭包本就持有 `session.id`，只需在 `loop.ts` 的 handle 里带出即可，**纯新增字段、不改既有签名**。影响面：`contracts.ts` 与 `src/plugin/containers.test.ts` 的手写 `AgentControl` 字面量各补一处。对 08/09 亦有用：插件要知道"当前会话"时不必自己猜 |
+| Y4 | **集成链路 4（取消）改为"等首片真的到达"再取消，不再 sleep 50ms** ——Baseline 后修订，测试夹具加固，无实现改动 | 原写法 `await new Promise((r) => setTimeout(r, 50))` 是在赌"50ms 内首片一定到了"。全量并行跑 60 个测试文件时负载高，取消可能比首片更早，此刻回合还没产出任何文本，落进 §5 边界表 19 的**空回合**（`turn/start` + `user/message` + `turn/end`，**无 assistant/message**），`events.find(e => e.type === 'assistant/message')` 拿到 `undefined` ⇒ 偶发红灯（实测约 1/7 概率，14 次全量中红 2 次）。改为订阅 `stream/chunk` 事件、收到第一个 text 增量后才 `cancel()`——等真实信号而非等时间。修复后连跑 5 次全量全绿 |
 
 ### 评审排除的误报（第二轮，探针实证）
 

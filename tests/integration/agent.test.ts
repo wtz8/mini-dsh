@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Config, Ctx, PluginEntry, SessionEvent } from '../../src/index.js'
+import type { Config, Ctx, PluginEntry, SessionEvent, Unsubscribe } from '../../src/index.js'
 import { boot, definePlugin, deriveMessages, registerBuiltin, shutdown } from '../../src/index.js'
 import { createDefaultConfig } from '../../src/config/index.js'
 import { createLlmPlugin } from '../../src/llm/index.js'
@@ -320,9 +320,23 @@ describe('06-agent 集成', () => {
     const ctx = await bootAll(fake.fetchImpl)
     const ctl = ctx.agent.resolve()
 
+    // 等**首片真的到达**再取消，而不是 sleep 一段去赌：原写法 `setTimeout(50)` 在
+    // 全量并行跑 60 个测试文件时可能取消得比首片还早，此刻回合还没产出任何文本，
+    // 落进 06 §5 边界表 19 的"空回合"（只有 turn/start + user/message + turn/end，
+    // **没有 assistant/message**），下面的 find 就会拿到 undefined——曾偶发红灯。
+    let offFirst: Unsubscribe | undefined
+    const firstChunk = new Promise<void>((resolve) => {
+      offFirst = ctx.events.on('stream/chunk', ({ delta }) => {
+        if (delta.type === 'text') {
+          offFirst?.()
+          resolve()
+        }
+      })
+    })
+
     const task = ctl.run({ text: '讲个长故事' })
-    // 等首片到达（回合已开始产出）
-    await new Promise((r) => setTimeout(r, 50))
+    await firstChunk
+    offFirst?.()
     ctl.cancel()
     const summary = await task
 

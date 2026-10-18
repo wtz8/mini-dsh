@@ -307,6 +307,8 @@ export function createAgentControl(deps: AgentDeps): AgentControlHandle {
     if (current !== undefined) await current
   }
 
-  const handle: AgentControlHandle = { run, cancel, abortAndWait }
+  // sessionId 带出到控制面（07 Y4）：07 要显示当前会话 id，而 `session/header`
+  // 事件在 boot 期间就发完了，订阅方取不到；08/09 的插件也可能需要"当前会话"
+  const handle: AgentControlHandle = { sessionId, run, cancel, abortAndWait }
   return handle
 }

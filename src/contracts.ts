@@ -383,6 +383,16 @@ export interface SessionStoreContainer extends SessionStore {
 
 /** agent 控制面（06 的 `builtin:agent-loop` 注册）。 */
 export interface AgentControl {
+  /**
+   * 本控制面所绑定的会话 id。
+   *
+   * 会话在 06 的 `setup()` 内 create/open（06 §8-Q1），因此 `session/header` 事件
+   * 在 `boot()` 期间就写完了——**订阅方永远收不到它**。07 需要一个确定取值而非
+   * "从 `sessions.list()` 推定最新一条"的出口，故在此显式声明（07 X2 / Y4）。
+   *
+   * 对 08/09 同样有用：插件若要知道"当前会话"（如按会话存放记忆），不必自己猜。
+   */
+  readonly sessionId: string
   /** 运行一个回合，返回回合汇总。 */
   run(input: UserInput): Promise<TurnSummary>
   /** 取消当前回合（与 `ctx.signal` 的进程级取消是两条独立通道，见架构 §5.2）。 */

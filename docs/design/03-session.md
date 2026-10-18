@@ -385,6 +385,20 @@ fixture：`tests/integration/session-fixtures/`（与 01 的 `config-fixtures/`�
 |---|---|---|---|
 | Y1 | **（P1）崩溃留下的半行会连带吞掉崩溃后第一条事件**：半行没有行尾 `\n`，下一次 `append` 的内容被拼进那条坏行，读侧按行解析时整行作废——一次崩溃从"丢半行"变成"丢半行 + 丢第一条"，且**内存里有、磁盘上没有**，resume 后凭空消失 | `appendLine` 写前检查文件末字节：非 `\n` 则先补一个换行"封口"再写新行（半行本身仍按坏行跳过） | 探针 A1：修复前用新实例从磁盘读只剩 header（`raw tail` 显示两条事件被并进同一行）；修复后磁盘上两条都在（已补 `jsonl.test.ts` 回归） |
 
+### 评审修复追加（2026-10-17 跨模块攻击式评审，续 Y 编号）
+
+模块边界的攻击式评审（`docs/ATTACK_REVIEW_2026-10-17.md`）对 03 提出 7 条（F-01/05/07/08/10/12/13，其中 F-07/F-10 与 00 的同类缺陷同式），**全部实证成立并修复**。
+
+| # | 问题 | 修复 | 证据 |
+|---|---|---|---|
+| Y2 | **（P1）session id 可穿越出 sessions 根目录**：`open` / `read` / `append` 把外部 id 直接 `path.join(root, id, 'session.jsonl')`；含 `../` 的 id 能读写根目录之外、名字恰为 `session.jsonl` 的文件——读是信息泄露，`append` 是向任意文件追加 | `#fileOf` 统一校验：拒绝空串、`.`、`..`、路径分隔符与控制字符，并对解析结果做**根目录包含性检查**（`path.relative` 不以 `..` 开头）。`#root` 在构造时归一化为绝对路径 | 探针 F-01：修复前 `open('../outside')` 成功打开根目录外的会话；修复后 `not_found`，且外部文件一字节未变（已补 7 种非法 id 的回归） |
+| Y3 | **（P2）并发 `create` 同一 id 的检查与创建不是原子的**：`access` 预检 + `appendFile` 是 check-then-act，两个调用可能各写一条 header，之后加载只认第一条，内存状态与磁盘创建者出现歧义 | 新增 `createFile()` 用 `flag: 'wx'` **独占创建**，把"检查 + 创建 + 写 header"压成一次原子文件操作；`EEXIST` 翻译为原有的"已存在"`io` 错误 | 探针 F-08：修复前 50 轮并发里有 6 轮写出两条 header；修复后恒为 1 条（已补并发 `create` 回归） |
+| Y4 | **（P2）`list()` 返回的 id 不能用于 `open()`**：目录被人为重命名后，`list` 回 header 里的 id 而 `open` 按目录名拼路径——"列表里看得见、打不开"。X2 只定义了 `open` 侧的两个 id 语义，`list` 侧没有闭合 | `list()` 改为返回**存储键（目录名）**；`open()` 的 `meta.id` 仍取 header（X2 不变）。对外暴露的"可操作键"恒为目录名 | 探针 F-13：修复前 `list` 给 `original`、`open('original')` 抛 `not_found`；修复后 `list` 给 `renamed` 且能打开 |
+| Y5 | **（P2）`append` 保存调用方事件对象引用**：落盘后把原始对象直接放进缓存，调用方 `await append()` 后改写对象会改掉 `read()` 的缓存而磁盘不变；写链前有等待项时连"实际写入什么"都会变 | 入口即 `cloneEvent()`（序列化往返，与磁盘同构），写入/缓存/派发/`onAppend` 全部用同一快照 | 探针 F-12：修复前缓存为"被改写"、磁盘为"原文"；修复后两侧都是原文（已补回归） |
+| Y6 | **（P2）退订句柄不幂等**：按回调函数身份删订阅，"退订 → 同一函数重新订阅 → 再调旧句柄"会删掉新订阅 | `subscribe` 每次注册包一层独立 token，句柄按 token 删除（与内核 `EventBus` 的 Y1 同式）；派发仍是快照遍历，退订只影响后续事件 | 探针 F-07（session 侧同式）：旧句柄再调后 hits 由 0 变 1（已补回归） |
+| Y7 | **（P2）async 订阅者的 rejection 逃逸**：签名返回 `void` 但 TS 允许 async 函数，抛错不进同步 `try/catch`，成为 `unhandledRejection`，`onError` 收不到 | `#dispatch` 检测 thenable 并显式挂 `catch` 转 `onError`（与内核 `EventBus` 的 Y3 同式） | 探针 F-10（同式）：修复前 `onError` 0 次、unhandledRejection 1 次；修复后 1 / 0（已补回归） |
+| Y8 | **（P2）投影用"整段日志出现过同 id 结果"判断调用已完成**：02 的兜底 id `call_${index}` 在不同响应间重复（都从 0 起算），较早响应的结果会让较新响应的同 id 声明被误判为已完成——取消或结果缺失时，投影出"有 tool_calls、无 tool 消息"的 assistant，provider 判 400 | 改为**顺序配对**：一个 `tool/result` 只结算最早一条尚未结算的同 id 声明（FIFO），声明必须"之后"有结果才算已执行；`pending` 由 Set 改为**计数 Map**（重复 id 时一条结果只抵消一条声明） | 既有的"部分结果"/"孤立结果"用例语义不变；新增 2 例：重复 id 跨响应、重复 id 各有一条结果 |
+
 **评审排除的误报**（探针证伪，记录以免后续重复怀疑）：
 
 | 怀疑 | 结论 |

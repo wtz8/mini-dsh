@@ -15,7 +15,8 @@
 
 /**
  * 通用退订句柄：调用后取消对应订阅（事件监听、会话订阅等）。
- * 重复调用为安全无操作（幂等）。
+ * 重复调用为安全无操作（幂等）；**旧句柄不会影响其后新建的订阅**
+ * （每次注册有独立身份，退订只撤销自己那一条）。
  */
 export type Unsubscribe = () => void
 
@@ -473,6 +474,10 @@ export interface Plugin {
    *
    * **不设超时**：内核不中断挂起的 dispose（设计 §5），由 07 的退出流程自行兜底
    * （`Promise.race` + 强制退出），否则单个卡住的 dispose 会让 `shutdown` 永不返回。
+   *
+   * **不得等待 `ctx.signal` 的取消**：`shutdown` 在全部 dispose 返回之后才 abort，
+   * 在 dispose 里等该信号会死锁。需要终止在途任务的插件应在 dispose 内自行 abort
+   * 自己的 controller。
    */
   dispose?(): void | Promise<void>
 }

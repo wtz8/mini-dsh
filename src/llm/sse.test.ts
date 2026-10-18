@@ -38,6 +38,20 @@ describe('SseParser · 基本分帧', () => {
     const parser = new SseParser()
     expect(parser.push('data: a\ndata: b\n\n')).toEqual([{ kind: 'data', data: 'a\nb' }])
   })
+
+  it('CRLF 被分片切断（\\r 在片尾、\\n 在片首）不误判空行，多 data 行仍合并（review Y5）', () => {
+    // 回归：逐片归一化会把片尾的 \r 变成 \n、片首的 \n 原样保留，拼出 \n\n，
+    // 于是一个合法的多行 data 事件被拆成两个 frame
+    const parser = new SseParser()
+    expect(parser.push('data: a\r')).toEqual([])
+    expect(parser.push('\ndata: b\r\n\r\n')).toEqual([{ kind: 'data', data: 'a\nb' }])
+  })
+
+  it('流末尾遗留的裸 \\r 在 flush 时仍按行结束符处理（review Y5）', () => {
+    const parser = new SseParser()
+    parser.push('data: tail\r')
+    expect(parser.flush()).toEqual([{ kind: 'data', data: 'tail' }])
+  })
 })
 
 describe('SseParser · 忽略与非帧', () => {

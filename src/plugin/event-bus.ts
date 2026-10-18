@@ -11,6 +11,21 @@ type NotifyListener = (p: unknown) => void
 type WaterfallListener = (p: unknown) => unknown | Promise<unknown>
 
 /**
+ * 判断回调是否返回了 thenable（review Y6）。
+ *
+ * 通知监听器签名返回 `void`，但 TypeScript 允许把 `async` 函数赋给它——此时回调内
+ * 的抛错变成 rejected Promise，**逃过同步 `try/catch`**，最终成为 unhandledRejection。
+ * 那既不符合"单个监听器抛错只记 log"的契约，也不受 `emit` 的控制。
+ */
+function isThenable(value: unknown): value is Promise<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  )
+}
+
+/**
  * 事件总线的内核实现（架构 §5.3，通知 + 瀑布两域）。
  *
  * - 两张 `Map<string, listener[]>`，监听器**按注册序追加**（数组尾部 push）；
@@ -53,9 +68,21 @@ export class EventBusImpl implements EventBus {
     if (i >= 0) list.splice(i, 1)
   }
 
+  /**
+   * 注册通知监听器。
+   *
+   * 每次注册包一层独立 `token`，退订句柄只删自己那条并置 `active = false`
+   * （review Y4）：若按回调函数身份删（原实现），"退订 → 同一函数重新注册 →
+   * 再调旧句柄"会删掉**新**订阅，与契约"重复调用安全"的承诺不符。
+   */
   on<K extends keyof NotificationMap>(type: K, fn: (p: NotificationMap[K]) => void): Unsubscribe {
-    this.#bucket('notify', type).push(fn as NotifyListener)
-    return () => EventBusImpl.#off(this.#bucket('notify', type), fn)
+    const bucket = this.#bucket('notify', type)
+    // 每次注册包一层独立 token：退订句柄只删自己那条（review Y4）。身份独立即可
+    // 保证幂等与"旧句柄不影响新订阅"；不再用 active 标记，因为派发是**快照遍历**
+    // ——监听器在回调中退订他人，被退订者仍应收到本次事件（既有契约语义）。
+    const token: NotifyListener = (payload) => fn(payload as NotificationMap[K])
+    bucket.push(token)
+    return () => EventBusImpl.#off(bucket, token)
   }
 
   emit<K extends keyof NotificationMap>(type: K, payload: NotificationMap[K]): void {
@@ -63,7 +90,14 @@ export class EventBusImpl implements EventBus {
     const listeners = [...this.#bucket('notify', type)]
     for (const fn of listeners) {
       try {
-        fn(payload)
+        const ret: unknown = fn(payload)
+        // async 监听器（异步函数赋给 void 签名是允许的）的 rejection 不会进同步
+        // try/catch：显式挂 catch，否则逃逸成 unhandledRejection（review Y6）
+        if (isThenable(ret)) {
+          void ret.catch((err: unknown) => {
+            this.#log.error(`event listener of '${type}' threw`, err)
+          })
+        }
       } catch (err) {
         // 通知事件的错误策略（架构 §5.3）：吞掉 + 记 log，emit 永不抛
         this.#log.error(`event listener of '${type}' threw`, err)
@@ -75,8 +109,11 @@ export class EventBusImpl implements EventBus {
     type: K,
     fn: (p: WaterfallMap[K]) => WaterfallMap[K] | void | Promise<WaterfallMap[K] | void>,
   ): Unsubscribe {
-    this.#bucket('waterfall', type).push(fn as WaterfallListener)
-    return () => EventBusImpl.#off(this.#bucket('waterfall', type), fn)
+    const bucket = this.#bucket('waterfall', type)
+    // 与通知域同式：独立 token 作退订身份（review Y4）
+    const token: WaterfallListener = (payload) => fn(payload as WaterfallMap[K])
+    bucket.push(token)
+    return () => EventBusImpl.#off(bucket, token)
   }
 
   async waterfall<K extends keyof WaterfallMap>(type: K, payload: WaterfallMap[K]): Promise<WaterfallMap[K]> {

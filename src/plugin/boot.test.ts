@@ -178,6 +178,20 @@ describe('boot', () => {
     await expect(boot(makeConfig([{ source: 'builtin:dup-name' }]))).rejects.toThrow(/not found/)
   })
 
+  it('旧退订句柄不删除同名重注册的新工厂（review Y8）', async () => {
+    // 回归：原实现按名称无条件 delete，旧句柄会把后来注册的工厂一起删掉
+    const first: PluginFactory = () => ({ name: 'stale-1', setup: () => {} })
+    const offFirst = registerBuiltin('stale-name', first)
+    offFirst()
+    const second: PluginFactory = () => ({ name: 'stale-2', setup: () => {} })
+    unregisterBuiltins.push(registerBuiltin('stale-name', second))
+    offFirst() // 旧句柄再调一次：幂等
+
+    const ctx = await boot(makeConfig([{ source: 'builtin:stale-name' }]))
+    expect(ctx).toBeDefined() // 新工厂仍在表里，能正常挂载
+    await shutdown(ctx)
+  })
+
   it('factory() 抛错：同样先清理已挂载插件再抛 BootError', async () => {
     const log: string[] = []
     const a = addBuiltin('f-a', () => tracer('a', log, () => {}))
@@ -275,6 +289,19 @@ describe('shutdown', () => {
     expect(afterFirst).toEqual(['setup:a', 'setup:b', 'dispose:b', 'dispose:a'])
     expect(log).toEqual(afterFirst) // 第二轮无任何新增调用
     expect(ctx.signal.aborted).toBe(true)
+  })
+
+  it('并发 shutdown 共享同一轮清理：每个插件只 dispose 一次（review Y9）', async () => {
+    // 回归：原实现"结束时清空挂载序"只能覆盖串行重复调用；两个并发调用会同时
+    // 拿到同一份非空数组，各 dispose 一遍
+    const log: string[] = []
+    const a = addBuiltin('cc-a', () => tracer('a', log, () => {}))
+    const b = addBuiltin('cc-b', () => tracer('b', log, () => {}))
+
+    const ctx = await boot(makeConfig([a, b]))
+    await Promise.all([shutdown(ctx), shutdown(ctx), shutdown(ctx)])
+
+    expect(log).toEqual(['setup:a', 'setup:b', 'dispose:b', 'dispose:a'])
   })
 
   it('boot 失败清理与正常 shutdown 语义一致（复用同一流程）', async () => {

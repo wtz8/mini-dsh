@@ -147,12 +147,30 @@ describe('集成 · 三层合并链路', () => {
     await shutdown(ctx)
     expect(state.disposed).toBe(true)
   })
+
+  it('flags 里的插件实例配置不被 boot 反向冻结（review Y11：与调用方入参解耦）', async () => {
+    const globalDir = await tempDir()
+    const projectDir = await tempDir()
+    ;(globalThis as Record<string, unknown>).__m01Config = { disposed: false }
+
+    // 调用方自己的对象：boot 的 deepFreeze 不得碰到它（否则调用方后续改 flags 抛 TypeError）
+    const instanceConfig = { nested: { probe: true } }
+    const flags = {
+      plugins: [{ source: probeSource().replace(/\\/g, '/'), config: instanceConfig }],
+    }
+    const ctx = await boot(await loadConfig({ globalDir, projectDir, flags }))
+
+    expect(Object.isFrozen(instanceConfig)).toBe(false)
+    expect(Object.isFrozen(instanceConfig.nested)).toBe(false)
+    // 内核用的是自己的副本，仍然照常冻结（插件不得改写实例配置）
+    expect(Object.isFrozen(ctx.config.plugins[0]?.config)).toBe(true)
+    await shutdown(ctx)
+  })
 })
 
 /* ============================================================
  * 链路 2：logLevel 端到端（R4 的落点验证）
  * ============================================================ */
-
 describe('集成 · logLevel 端到端链路', () => {
   /** 捕获 stderr 写入（Logger 的输出目标）。 */
   function captureStderr(): { lines: string[]; restore: () => void } {

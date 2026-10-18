@@ -330,6 +330,19 @@ fixture 目录：`tests/integration/llm-fixtures/`（与 01 的 `config-fixtures
 | Y4 | **请求构造错误被误分类为 `network`**（P2）：`buildRequestBody` 在 `try` 内，契约外畸形 `LLMRequest` 的 `TypeError` 被包装成 `LlmError{kind:'network'}`，07 会把本地 bug 提示成"网络故障" | 把 `buildRequestUrl` / `buildRequestBody` 移到 `try` **之外**，编程错误原样抛出 | 探针 G1：修复前 `kind=network`；修复后为 `TypeError` 且非 `LlmError`（已补 1 例 `adapter.test.ts`） |
 | — | **U1 补记**：`finally` 中 `await reader.cancel()`，而设计 §4.1 伪代码是 `void ...`（不 await） | 保留 await：等待 cancel 完成使"已关闭"可被测试确定性观测（"提前 break"用例据此断言 `state.cancelled`）。属实现偏离设计伪代码，理由充分，登记备查 | `adapter.ts` 对应行注释已说明 |
 
+### 评审修复追加（2026-10-17 跨模块攻击式评审）
+
+| # | 问题 | 修复 | 证据 |
+|---|---|---|---|
+| Y5 | **SSE 的 CRLF 在分片边界被误拆成两个换行**（P2）：行尾归一化逐片做，片 1 以 `\r` 结尾（转成 `\n`）、片 2 以 `\n` 开头（原样保留），拼出 `\n\n` → 解析器误判为空行，把一个合法的多行 `data:` 事件拆成两个 frame（违背 RFC 8895 的"多 `data:` 行以 `\n` 合并"） | `SseParser` 增加 `#pendingCR`：把片尾待定的裸 `\r` 留到下一片再判断；`flush()` 时遗留 `\r` 仍按行结束符补 `\n` | 探针 F-06：修复前 `push('data: a\r')` + `push('\ndata: b\r\n\r\n')` 产出两个帧（`a` / `b`）；修复后产出一个帧 `a\nb`（已补 2 例 `sse.test.ts`，含 flush 残帧） |
+
+**本次追加的评审排除项**：
+
+| 怀疑 | 结论 |
+|---|---|
+| `usage` / `tool-call index` 只检查"有限数值"，负数或小数 token 可通过（P3） | **不改**：`asNumber` 已挡 `NaN`/`Infinity`；usage 仅用于展示与统计，收紧为"非负整数"会让少数网关的怪异值（如 `-1` 表示未统计）直接中断整条流，代价大于收益。index 缺失归 0 是线格式的既定容错（单调用场景），已写在 `wire.ts` 注释里 |
+| HTTP 无超时，连接可能长期挂住 | **设计边界，非缺陷**：02 明确把超时/重试交给调用方（D5），07 必须传 `AbortSignal` 或加全局超时；责任在启动层 |
+
 **评审排除的误报**（探针证伪，记录以免后续重复怀疑）：
 
 | 怀疑 | 结论 |

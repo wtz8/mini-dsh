@@ -84,10 +84,35 @@ export class ToolRegistryImpl implements ToolRegistry {
 export class PromptRegistryImpl implements PromptRegistry {
   readonly #sections = new Map<string, PromptSection>()
 
-  /** @throws 同 id 重复注册 */
+  /**
+   * 注册一个 prompt section。
+   *
+   * 注册期校验形状（review Y10）：`PromptSection` 是 TypeScript 接口，而外部 JS
+   * 插件不受编译约束。此前只查 id 重复，若插件传入 `order: NaN`，排序比较器返回
+   * `NaN`（JS sort 视为相等），"同 order 按 id 字典序"的约定被绕过，段序退化为
+   * 注册顺序——系统提示的排版会无声漂移。`id` / `render` 同理。
+   *
+   * 存**冻结副本**：插件注册后改写自己对象上的 `id`/`order` 不影响注册表（渲染
+   * 仍用其 `render` 闭包）。
+   *
+   * @throws Error 形状非法或同 id 重复注册（setup 内抛出由组合根转 BootError）
+   */
   section(s: PromptSection): void {
-    if (this.#sections.has(s.id)) throw new Error(errDuplicate('prompt section', s.id))
-    this.#sections.set(s.id, s)
+    if (typeof s !== 'object' || s === null) {
+      throw new Error('prompt section must be an object')
+    }
+    const { id, order, render } = s
+    if (typeof id !== 'string' || id.trim() === '') {
+      throw new Error('prompt section: `id` must be a non-empty string')
+    }
+    if (typeof order !== 'number' || !Number.isFinite(order)) {
+      throw new Error(`prompt section '${id}': \`order\` must be a finite number`)
+    }
+    if (typeof render !== 'function') {
+      throw new Error(`prompt section '${id}': \`render\` must be a function`)
+    }
+    if (this.#sections.has(id)) throw new Error(errDuplicate('prompt section', id))
+    this.#sections.set(id, Object.freeze({ id, order, render }))
   }
 
   /**

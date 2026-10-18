@@ -278,6 +278,17 @@ resolvePermission(permissions, toolName)
 | X7 | `validateConfig` 拒绝 `permissions` 的**空键与纯空白键**（path `config.permissions.<empty>`） | 设计 §4.2 本就要求"键为非空字符串"，实现漏了。空键永远不会被任何工具名命中（工具名非空）也不会被前缀命中，是纯死配置——静默放过比启动失败更难排查 |
 | X8 | `requireString` 返回 **trim 后**的值（原实现只用它判空、原样返回） | `" deepseek "` 这类手写意外若原样透传，02 会拿带空格的模型名去建连，失败点离配置太远。判空与归一化应同源 |
 
+### 评审修复（2026-10-17 跨模块攻击式评审，review 期编号 Y）
+
+| # | 修复 | 说明 | 实证 |
+|---|---|---|---|
+| Y1 | `validateConfig` 拒绝 `permissions` 键的**首尾空白**（path `config.permissions." bash "`） | 原校验只拒全空白键，`" bash "` 能通过；运行时按 `bash` 查找不命中 → 回退兜底 `ask`，用户写的 deny **静默降级**为交互询问。不做 trim 归一化：那会让 `"bash"` 与 `" bash "` 撞键，谁赢取决于书写顺序（与 X7 的"死配置早暴露"同式，直接报错） | 探针 F-04：修复前 keys=`[" bash "]`、`resolvePermission("bash") = "ask"`；修复后抛 `must not have leading or trailing whitespace` |
+| Y2 | `validateConfig` 对 `plugins[].config` 做**深拷贝**（新增 `merge.ts` 的 `clonePlain`） | `deepMerge` 对数组整值替换，`plugins` 数组及其 `config` 子对象与调用方入参共享引用；`boot()` 的 `deepFreeze` 会连带冻结调用方 `flags.plugins[].config`，调用方之后修改即抛 `TypeError` | 探针 F-11：修复前 `Object.isFrozen(flags.plugins[0].config) === true`；修复后调用方对象可写、`ctx.config` 内的副本仍冻结（已补 loadConfig→boot 集成回归） |
+
+**更正一条此前的结论**：01 首轮 review 记载"已核查排除：`loadConfig` 返回值与 flags 入参不共享子对象引用"——该结论只对**纯对象合并**成立。`plugins` 是数组（整值替换）而 `validateConfig` 又原样透传 `entryRaw.config`，这条路径共享引用，是当时漏掉的。Y2 修的就是它。
+
+**本次对 01 的 2 条（F-04/11）逐条实证全部成立，无证伪项**。
+
 ## 8. 决策点记录（2026-10-16 所有者拍板，全部按建议项决议）
 
 | # | 问题 | 决议 |

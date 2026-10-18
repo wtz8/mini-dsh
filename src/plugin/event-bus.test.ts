@@ -72,6 +72,44 @@ describe('EventBus · 通知域', () => {
     bus.emit('turn/end', { sessionId: 's', turnNo: 1 })
     expect(seen).toEqual(['a', 'b', 'a'])
   })
+
+  it('旧退订句柄不影响用同一函数重新注册的新订阅（review Y4）', () => {
+    // 回归：原实现按回调身份删，旧句柄会把"退订后重新订阅"的新条目一起删掉
+    const bus = new EventBusImpl(stubLogger())
+    let hits = 0
+    const fn = (): void => {
+      hits += 1
+    }
+    const off = bus.on('turn/start', fn)
+    off()
+    bus.on('turn/start', fn)
+    off() // 幂等，且只作用于自己那次注册
+
+    bus.emit('turn/start', { sessionId: 's', turnNo: 1 })
+    expect(hits).toBe(1)
+  })
+
+  it('async 监听器抛错：经 log.error 记录，不逃逸为 unhandledRejection（review Y6）', async () => {
+    const log = stubLogger()
+    const bus = new EventBusImpl(log)
+    const escaped: unknown[] = []
+    const onUnhandled = (err: unknown): void => {
+      escaped.push(err)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    // 通知监听器签名返回 void，但 TS 允许 async 函数
+    bus.on('turn/start', (async () => {
+      throw new Error('async listener boom')
+    }) as unknown as () => void)
+
+    bus.emit('turn/start', { sessionId: 's', turnNo: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    process.off('unhandledRejection', onUnhandled)
+
+    expect(log.errors).toHaveLength(1)
+    expect(log.errors[0]![0]).toContain('turn/start')
+    expect(escaped).toHaveLength(0)
+  })
 })
 
 describe('EventBus · 瀑布域', () => {

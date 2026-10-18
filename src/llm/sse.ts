@@ -63,6 +63,15 @@ export class SseParser {
   #buffer = ''
   /** 已收到 `[DONE]`：其后的一切输入都丢弃（provider 不应再发，防御性处理）。 */
   #done = false
+  /**
+   * 上一片结尾的裸 `\r`，留到下一片判断（review Y5）。
+   *
+   * 为什么不能逐片归一化：若一片以 `\r` 结尾、下一片以 `\n` 开头，逐片处理会把
+   * 前者转成 `\n`、后者保留 `\n`，拼出 `\n\n` ——解析器误判为空行，把一个合法的
+   * 多行 `data:` 事件拆成两个 frame（`data: a` + `data: b` 本应按规范以 `\n`
+   * 合并成一条）。留一个字符到下一片再判断，`\r\n` 才不会被拆散。
+   */
+  #pendingCR = false
 
   /**
    * 喂入一个文本分片，返回本次可产出的全部帧。
@@ -73,8 +82,7 @@ export class SseParser {
    */
   push(chunk: string): SseFrame[] {
     if (this.#done) return []
-    // 归一化行结束符：\r\n 与裸 \r 统一为 \n，使后续只需按 \n\n 切块
-    this.#buffer += chunk.replace(/\r\n?/g, '\n')
+    this.#buffer += this.#normalize(chunk)
     return this.#drain(false)
   }
 
@@ -84,7 +92,28 @@ export class SseParser {
    */
   flush(): SseFrame[] {
     if (this.#done) return []
+    // 流末尾遗留的裸 `\r` 仍是一个行结束符：补成 `\n` 再按残帧解析
+    if (this.#pendingCR) {
+      this.#buffer += '\n'
+      this.#pendingCR = false
+    }
     return this.#drain(true)
+  }
+
+  /**
+   * 归一化行结束符（`\r\n` 与裸 `\r` 都视为 `\n`），并跨分片保留结尾的裸 `\r`。
+   *
+   * @returns 归一化后的文本（不含结尾未决的 `\r`）
+   */
+  #normalize(chunk: string): string {
+    let text = this.#pendingCR ? `\r${chunk}` : chunk
+    if (text.endsWith('\r')) {
+      this.#pendingCR = true
+      text = text.slice(0, -1)
+    } else {
+      this.#pendingCR = false
+    }
+    return text.replace(/\r\n?/g, '\n')
   }
 
   /** 切出缓冲区中的完整块；`final` 为真时把剩余文本当作最后一块处理。 */
@@ -99,6 +128,7 @@ export class SseParser {
         if (frame.kind === 'done') {
           this.#done = true
           this.#buffer = ''
+          this.#pendingCR = false
           return frames
         }
       }

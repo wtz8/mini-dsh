@@ -124,6 +124,27 @@ describe('PromptRegistry', () => {
     reg.section({ id: 'boom', order: 1, render: () => { throw new Error('section failed') } })
     expect(() => reg.render()).toThrow('section failed')
   })
+
+  it('注册期校验形状：id 非空 / order 是有限数值 / render 是函数（review Y10）', () => {
+    // 外部 JS 插件不受 TS 约束：order 为 NaN 时比较器返回 NaN（sort 视为相等），
+    // "同 order 按 id 字典序"被绕过，段序退化为注册顺序
+    const reg = new PromptRegistryImpl()
+    expect(() => reg.section({ id: '', order: 1, render: () => '' })).toThrow(/`id` must be a non-empty string/)
+    expect(() => reg.section({ id: 'a', order: Number.NaN, render: () => '' })).toThrow(/`order` must be a finite number/)
+    expect(() => reg.section({ id: 'a', order: Number.POSITIVE_INFINITY, render: () => '' })).toThrow(/finite number/)
+    expect(() => reg.section({ id: 'a', order: 1, render: 42 as never })).toThrow(/`render` must be a function/)
+    expect(() => reg.section(null as never)).toThrow(/must be an object/)
+  })
+
+  it('注册时存冻结副本：插件事后改写自己的 order 不影响排序（review Y10）', () => {
+    const reg = new PromptRegistryImpl()
+    const a = section('a', 10)
+    const b = section('b', 20)
+    reg.section(a)
+    reg.section(b)
+    ;(a as { order: number }).order = 99
+    expect(reg.render()).toBe('SECTION:a\n\nSECTION:b')
+  })
 })
 
 describe('SessionStoreContainer', () => {

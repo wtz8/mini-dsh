@@ -23,14 +23,16 @@ const builtinPlugins = new Map<string, PluginFactory>()
  *
  * @param name builtin 名（`config.plugins[].source` 写作 `builtin:<name>`）
  * @param factory 插件工厂
- * @returns 退订句柄：从表中移除该工厂；重复调用安全（测试与进程内重挂载场景用）
+ * @returns 退订句柄：从表中移除该工厂；重复调用安全（测试与进程内重挂载场景用）。
+ *   **只移除本次注册的那一份**（review Y8）：若同名被重新注册过，旧句柄不会误删
+ *   新工厂（原实现按名称无条件 delete）
  * @throws Error 同名重复注册
  */
 export function registerBuiltin(name: string, factory: PluginFactory): Unsubscribe {
   if (builtinPlugins.has(name)) throw new Error(`builtin plugin '${name}' already registered`)
   builtinPlugins.set(name, factory)
   return () => {
-    builtinPlugins.delete(name)
+    if (builtinPlugins.get(name) === factory) builtinPlugins.delete(name)
   }
 }
 
@@ -42,6 +44,14 @@ export function registerBuiltin(name: string, factory: PluginFactory): Unsubscri
 const mountOrder = new WeakMap<Ctx, Plugin[]>()
 /** shutdown 需要 abort 的 controller 同样不能挂到 ctx 上，与挂载序并行的内部记录。 */
 const controllers = new WeakMap<Ctx, AbortController>()
+/**
+ * 首轮 shutdown 的进行中 Promise（review Y9）。
+ *
+ * 为什么需要：原先"结束时清空挂载序"只能保证**串行**重复调用幂等——两个并发
+ * `shutdown` 都会在清空前拿到同一份非空数组，于是每个插件被 dispose 两次。
+ * 用单飞记忆把并发调用收敛到同一轮清理。
+ */
+const shutdowns = new WeakMap<Ctx, Promise<void>>()
 
 /**
  * 递归冻结：对 config 全树（含 `plugins[].config` 与数组元素）执行 `Object.freeze`。
@@ -203,8 +213,12 @@ export async function boot(config: Config): Promise<Ctx> {
  *
  * 服务两个调用方：正常退出（07 CLI 的退出流程）与 boot 失败清理（R3 决议）。
  *
- * **幂等**：结束后清空挂载序，因此重复调用（07 的退出路径与信号路径可能各调一次）
- * 不会再触发第二轮 dispose；`abort()` 本身亦为幂等操作。
+ * **幂等且并发安全**：首轮清理被记忆为单个 Promise（review Y9），并发调用共享同一
+ * 轮 dispose；结束后清空挂载序，后续调用直接返回。`abort()` 本身亦为幂等操作。
+ *
+ * **abort 在全部 dispose 之后**（R3 决议的时序）：因此插件不得在 dispose 里等待
+ * `ctx.signal` 触发的取消——那个信号要等 dispose 全部返回才会发出，等待会死锁。
+ * 需要主动终止在途任务的插件应在 dispose 内自行 abort 自己的 controller。
  *
  * 挂载序中含"setup 未成功"的插件（X5）——它们同样会被 dispose，以实现 R3 的
  * 半启动清理语义；`BootError.mounted` 名单不含它们。
@@ -212,17 +226,23 @@ export async function boot(config: Config): Promise<Ctx> {
  * @param ctx boot 返回的容器
  */
 export async function shutdown(ctx: Ctx): Promise<void> {
-  const mounted = mountOrder.get(ctx) ?? []
-  for (let i = mounted.length - 1; i >= 0; i--) {
-    const plugin = mounted[i]!
-    try {
-      await plugin.dispose?.()
-    } catch (err) {
-      // dispose 失败只记录：既不中断逆序清理，也不掩盖正在上抛的 BootError
-      ctx.log.error(`dispose of plugin '${plugin.name}' threw`, err)
+  const inFlight = shutdowns.get(ctx)
+  if (inFlight) return inFlight
+  const run = (async (): Promise<void> => {
+    const mounted = mountOrder.get(ctx) ?? []
+    for (let i = mounted.length - 1; i >= 0; i--) {
+      const plugin = mounted[i]!
+      try {
+        await plugin.dispose?.()
+      } catch (err) {
+        // dispose 失败只记录：既不中断逆序清理，也不掩盖正在上抛的 BootError
+        ctx.log.error(`dispose of plugin '${plugin.name}' threw`, err)
+      }
     }
-  }
-  // 清空挂载序：shutdown 幂等的落点（mounted 与 boot 持有的是同一数组引用）
-  mounted.length = 0
-  controllers.get(ctx)?.abort()
+    // 清空挂载序：串行重复调用不再触发第二轮 dispose（mounted 与 boot 持有同一数组引用）
+    mounted.length = 0
+    controllers.get(ctx)?.abort()
+  })()
+  shutdowns.set(ctx, run)
+  return run
 }

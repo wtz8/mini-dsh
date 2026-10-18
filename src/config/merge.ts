@@ -10,6 +10,37 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 }
 
 /**
+ * 深拷贝一个 JSON 形态的值：纯对象与数组递归复制，其余值（原始值、函数、类实例）
+ * 原样返回。
+ *
+ * 用途（review Y11）：`deepMerge` 对数组是**整值替换**，于是 `plugins` 数组本身
+ * 与 `plugins[].config` 的子对象会和调用方 `flags` 入参共享引用；`boot()` 的
+ * `deepFreeze` 会连带冻结调用方的对象，之后调用方再改 flags 就突然抛 TypeError。
+ * 校验层用本函数把插件实例配置复制成独立副本，切断这条别名。
+ *
+ * 配置来自 JSON，故不处理 `Date` / `Map` 等非 JSON 值——它们不会被复制，也就
+ * 不受本项目配置路径的影响。
+ *
+ * @param value 待复制的值
+ * @returns 独立副本（纯对象/数组）/ 原值（其余）
+ */
+export function clonePlain<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => clonePlain(item)) as unknown as T
+  }
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {}
+    for (const key of Object.keys(value)) {
+      // 与 deepMerge 规则 4 同理：不把 '__proto__' 自有键复制进新对象
+      if (key === '__proto__') continue
+      out[key] = clonePlain(value[key])
+    }
+    return out as T
+  }
+  return value
+}
+
+/**
  * 深合并覆盖层到基础对象（设计 §3 合并规则）。
  *
  * 规则（优先级由低到高：基础对象 → 覆盖层）：

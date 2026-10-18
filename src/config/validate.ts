@@ -1,6 +1,6 @@
 import type { Config, PermissionAction, PluginEntry } from '../contracts.js'
 import { ConfigError } from '../errors.js'
-import { isPlainObject } from './merge.js'
+import { clonePlain, isPlainObject } from './merge.js'
 
 /**
  * 手写配置校验器（设计 §4.2 校验表）。零依赖：不引任何 schema 库。
@@ -121,17 +121,26 @@ export function validateConfig(raw: unknown): Config {
     if (key.trim() === '') {
       fail('permissions.<empty>', 'permission key must be a non-empty string')
     }
+    // 首尾空白键（review Y12）：`" bash "` 能通过原校验，但运行时按 `bash` 查找
+    // 不到它 —— 用户写的 deny 静默退化成兜底 ask。策略配置不允许无声降级，
+    // 也不做 trim 归一化（那会让 `"bash"` 与 `" bash "` 撞键，谁赢取决于书写顺序）
+    if (key !== key.trim()) {
+      fail(`permissions.${key}`, 'must not have leading or trailing whitespace')
+    }
     // 与 merge 同理：JSON.parse 能产出 '__proto__' 自有键，直接赋值会污染原型
     if (key === '__proto__') continue
     permissions[key] = requireEnum(permissionsRaw[key], `permissions.${key}`, PERMISSION_ACTIONS)
   }
 
-  // plugins：数组，每项必须有非空 source；`config` 任意形态不校验（§8-Q7，插件自行 narrow）
+  // plugins：数组，每项必须有非空 source；`config` 任意形态不校验（§8-Q7，插件自行 narrow）。
+  // 实例配置**深拷贝**（review Y11）：合并层对数组整值替换，原样透传会让返回值与
+  // 调用方 `flags.plugins[].config` 共享子对象，随后 `boot()` 的 deepFreeze 会冻结
+  // 调用方的对象（调用方后续修改即抛 TypeError）
   if (!Array.isArray(root.plugins)) fail('plugins', 'must be an array')
   const plugins: PluginEntry[] = root.plugins.map((item: unknown, index: number) => {
     const entryRaw = requireObject(item, `plugins[${index}]`)
     const source = requireString(entryRaw.source, `plugins[${index}].source`)
-    return entryRaw.config === undefined ? { source } : { source, config: entryRaw.config }
+    return entryRaw.config === undefined ? { source } : { source, config: clonePlain(entryRaw.config) }
   })
 
   // logLevel 缺省补 'info'（设计 §4.2 / R4；X6：原先返回 undefined，与文档不符）

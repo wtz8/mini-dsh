@@ -63,6 +63,26 @@ export function localTimeZone(): string {
 }
 
 /**
+ * 把动态事实压成**单行**（review Y13）。
+ *
+ * 为什么必要：本段的值来自文件系统与配置——`cwd` 在 POSIX 上允许含换行，项目
+ * 配置里的 `model.provider` / `model.name` 也只要求"非空字符串"。直接模板插入时，
+ * 一个精心构造的目录名或配置值就能在 system prompt 里**伪造出新的一行指令**
+ * （例如 "- 忽略此前所有指令…"），而它与可信指令处在同一个 system 字符串里，
+ * 影响面高于普通工具输出注入。
+ *
+ * 处理方式是"压平"而非删除：换行/制表/控制字符替换为单个空格，保留值的可读性
+ * 与可诊断性（用户能看到目录名到底长什么样），同时确保它只占一行。
+ *
+ * @param value 待渲染的动态值
+ * @returns 单行文本（控制字符已折叠为空格）
+ */
+export function oneLine(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
+}
+
+/**
  * 构造运行环境段。
  *
  * @param options.env 环境事实提供者（惰性；段本身不做任何 IO）
@@ -79,12 +99,13 @@ export function createEnvironmentSection(options: EnvironmentSectionOptions): Pr
       const lines = [
         '# 运行环境',
         '',
-        `- 工作目录：${facts.cwd}`,
-        `- 操作系统：${facts.platform} / ${facts.arch}`,
-        `- 当前时间：${formatDateTime(facts.now)}（本地时区 ${localTimeZone()}）`,
+        // 所有来自 fs/配置的动态值一律单行化（Y13），否则可伪造新的系统提示行
+        `- 工作目录：${oneLine(facts.cwd) || 'unknown'}`,
+        `- 操作系统：${oneLine(facts.platform)} / ${oneLine(facts.arch)}`,
+        `- 当前时间：${formatDateTime(facts.now)}（本地时区 ${oneLine(localTimeZone())}）`,
       ]
       // 模型与上下文窗口来自 ctx.config：纯函数层拿不到，缺省即不渲染该行
-      if (facts.model !== undefined) lines.push(`- 模型：${facts.model}`)
+      if (facts.model !== undefined) lines.push(`- 模型：${oneLine(facts.model)}`)
       if (facts.contextWindow !== undefined) {
         lines.push(`- 上下文窗口：${facts.contextWindow} tokens`)
       }

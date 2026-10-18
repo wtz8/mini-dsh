@@ -295,6 +295,18 @@ boot({ ...最小 config, plugins: [{ source: '<toy 文件路径>' }] })
 | X6 | builtin 插件表（Map）改为 `boot.ts` 模块级**私有**状态，新增导出 `registerBuiltin(name, factory): Unsubscribe` 作为唯一注册入口，并经 `src/index.ts` 转发 | 原实现导出裸 Map，02–09 注册内置插件只能深引用 `src/plugin/boot.js`，与 §1"不深引用内部路径"自相矛盾；出口改为函数后可查重、可退订，内置模块不再触碰内部路径 |
 | X7 | `BootError.mounted` 由 `readonly mounted: string[]` 收窄为 `readonly mounted: readonly string[]`（构造参数同步收窄）；瀑布载荷仅在返回值 `typeof === 'object' && !== null` 时替换 | ①`readonly` 字段只锁引用不锁内容，名单可被外部改写，而 07 依赖它打印退出诊断——内容也应只读；②原判断 `next !== undefined` 会让返回 `false`/`0`/`''`/`null` 的监听器把载荷浇坏（实测 `false`），契约只认"同构对象替换"。两者均为**类型面/边界收紧**，不影响既有调用方与运行时行为 |
 
+### 评审修复（2026-10-17 跨模块攻击式评审，review 期编号 Y）
+
+| # | 修复 | 说明 | 实证 |
+|---|---|---|---|
+| Y1 | `EventBus.on` / `onWaterfall` / `registerBuiltin` 的退订句柄改为**按注册身份删除**（每次注册一个独立 token；builtin 按工厂引用比较） | 原实现按回调函数身份（`indexOf`）/按名称无条件 `delete`：`退订 → 同一函数重新注册 → 再调旧句柄` 会删掉**新**订阅/新工厂，与 `Unsubscribe` 契约"重复调用安全（幂等）"不符 | 探针 F-07：修复前旧句柄再次调用后新监听器不触发（hits=0），修复后 hits=1。派发仍是快照遍历——回调内退订他人，本次事件仍送达（既有用例不变） |
+| Y2 | `shutdown` 增加**单飞记忆** `WeakMap<Ctx, Promise<void>>` | 原实现靠"结束时清空挂载序"保证幂等，只覆盖**串行**重复调用；两个并发 shutdown 同时拿到非空数组，各 dispose 一遍 | 探针 F-09：修复前 2 个并发调用使 `disposed = 2`；修复后同一轮清理、每个插件一次 |
+| Y3 | 通知监听器的 **async rejection** 显式挂 `catch` 后记 `log.error` | 监听器签名返回 `void`，但 TS 允许把 `async` 函数赋给它；回调内抛错逃过同步 `try/catch`，成为进程级 `unhandledRejection`，与"单监听器抛错只记 log"契约不符 | 探针 F-10：修复前 `log.error` 0 次、`unhandledRejection` 1 次；修复后 log 1 次、逃逸 0 次 |
+| Y4 | `PromptRegistry.section` 增加**形状校验**（id 非空 / order 有限数值 / render 是函数）并存**冻结副本** | 外部 JS 插件不受 TS 约束：`order: NaN` 时比较器返回 `NaN`（JS sort 视为相等），"同 order 按 id 字典序"被绕过，段序退化为注册顺序 | 探针 F-17：修复前 `[NaN, 1, 0]` 渲染为 `A,C,B`（按注册序）；修复后注册即抛 `order must be a finite number` |
+| Y5 | `contracts.ts` 两处 JSDoc 澄清（**无签名改动**）：`Unsubscribe` 补"旧句柄不影响其后新建的订阅"；`Plugin.dispose` 补"不得等待 `ctx.signal`" | 前者是 Y1 的契约落点；后者是 Y2 的时序派生义务——`shutdown` 在全部 dispose 返回**之后**才 abort，在 dispose 里等该信号会死锁（评审 F-09 的第二问）。不改签名，仅补语义 | — |
+
+**本次对 00 的 4 条（F-07/09/10/17）逐条实证全部成立，无证伪项**；报告里另两条 P3（HTTP 错误体全量读入、`usage`/`index` 只查有限数值）属 02 的线格式取舍，结论记在 `02-llm.md` §7。
+
 
 ## 8. 决策点记录（2026-10-16 所有者拍板，原"遗留决策点"已全部关闭）
 

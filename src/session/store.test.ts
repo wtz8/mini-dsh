@@ -8,7 +8,7 @@ import type { SessionEvent } from '../contracts.js'
 import { SessionError } from '../errors.js'
 import { createJsonlSessionStore } from './store.js'
 import { SESSION_FILE } from './types.js'
-import type { JsonlSessionStore } from './types.js'
+import type { JsonlSessionStore, SessionListener } from './types.js'
 
 /**
  * JSONL 会话存储（设计 §4.2–§4.3、§5 边界表）。
@@ -73,6 +73,18 @@ describe('create', () => {
     await store.create(init)
     await expect(store.create(init)).rejects.toMatchObject({ kind: 'io' })
     await expect(store.create(init)).rejects.toBeInstanceOf(SessionError)
+  })
+
+  it('并发 create 同一 id 只有一个成功，磁盘上只有一条 header（review Y3）', async () => {
+    // 回归：原实现是 access 预检 + append，check-then-act 之间存在窗口，
+    // 两个并发调用可能各写一条 header（50 轮实测复现 6 次）
+    const store = makeStore(fixed)
+    const results = await Promise.allSettled([store.create(init), store.create(init)])
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1)
+    const lines = (await fs.readFile(path.join(dir, 'fixed-id', SESSION_FILE), 'utf8')).split('\n').filter(Boolean)
+    expect(lines.filter((l) => l.includes('session/header'))).toHaveLength(1)
   })
 })
 
@@ -145,6 +157,20 @@ describe('append', () => {
       kind: 'not_found',
     })
   })
+
+  it('入口即快照：调用方在 await 之后改写事件对象，不污染内存缓存（review Y2）', async () => {
+    // 回归：原实现把入参引用直接放进缓存，调用方改写后 read() 变了而磁盘没变，
+    // 当前进程与重启恢复的历史就此分叉
+    const store = makeStore(fixed)
+    const { id } = await store.create(init)
+    const event: SessionEvent = { type: 'user/message', content: '原文' }
+    await store.append(id, event)
+    ;(event as { content: string }).content = '被改写'
+
+    expect((await store.read(id))[1]).toEqual({ type: 'user/message', content: '原文' })
+    store.clear()
+    expect((await store.read(id))[1]).toEqual({ type: 'user/message', content: '原文' })
+  })
 })
 
 describe('open / read', () => {
@@ -203,6 +229,32 @@ describe('open / read', () => {
 
     expect(await store.read(id)).toHaveLength(1)
   })
+
+  it('id 只允许单一路径段：含 ../ 或分隔符一律 not_found，且不触碰根目录外的文件（review Y1）', async () => {
+    // 回归：原实现把外部 id 直接拼进路径，`../outside` 可读写 sessions 根目录之外的
+    // `session.jsonl`——open/read 是信息泄露，append 是向任意文件追加
+    const sessions = path.join(dir, 'sessions')
+    const outside = path.join(dir, 'outside')
+    await fs.mkdir(sessions, { recursive: true })
+    await fs.mkdir(outside, { recursive: true })
+    await fs.writeFile(
+      path.join(outside, SESSION_FILE),
+      `${JSON.stringify({ type: 'session/header', id: 'evil', createdAt: '2026-10-17T00:00:00.000Z', provider: 'p', model: 'm', cwd: '.' })}\n`,
+      'utf8',
+    )
+    const store = createJsonlSessionStore({ dir: sessions })
+
+    for (const bad of ['../outside', '..\\outside', 'a/b', 'a\\b', '..', '.', '']) {
+      await expect(store.open(bad)).rejects.toMatchObject({ kind: 'not_found' })
+      await expect(store.read(bad)).rejects.toMatchObject({ kind: 'not_found' })
+      await expect(store.append(bad, { type: 'turn/start', turnNo: 1 })).rejects.toMatchObject({
+        kind: 'not_found',
+      })
+    }
+    // 根目录外的文件一个字节都没变（没被读出去，更没被追加）
+    const text = await fs.readFile(path.join(outside, SESSION_FILE), 'utf8')
+    expect(text.split('\n').filter(Boolean)).toHaveLength(1)
+  })
 })
 
 describe('subscribe', () => {
@@ -250,6 +302,44 @@ describe('subscribe', () => {
     const store = makeStore()
     expect(() => store.subscribe('nope', () => {})).toThrow(SessionError)
   })
+
+  it('旧退订句柄不影响重新注册的同一函数（review Y5）', async () => {
+    // 回归：原实现按函数身份删，旧句柄会把"退订后重新订阅"的新订阅一起删掉
+    const store = makeStore(fixed)
+    const { id } = await store.create(init)
+    let hits = 0
+    const fn = (): void => {
+      hits += 1
+    }
+    const off = store.subscribe(id, fn)
+    off()
+    store.subscribe(id, fn)
+    off() // 旧句柄再调一次：幂等，不得删掉新订阅
+
+    await store.append(id, { type: 'turn/start', turnNo: 1 })
+    expect(hits).toBe(1)
+  })
+
+  it('async 订阅者抛错：经 onError 记录，不逃逸为 unhandledRejection（review Y6）', async () => {
+    const store = makeStore(fixed)
+    const { id } = await store.create(init)
+    const escaped: unknown[] = []
+    const onUnhandled = (err: unknown): void => {
+      escaped.push(err)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    // 签名返回 void，但 TS 允许 async 函数：错误不会进同步 try/catch
+    store.subscribe(id, (async () => {
+      throw new Error('async listener boom')
+    }) as unknown as SessionListener)
+
+    await store.append(id, { type: 'turn/start', turnNo: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    process.off('unhandledRejection', onUnhandled)
+
+    expect(listenerErrors).toHaveLength(1)
+    expect(escaped).toHaveLength(0)
+  })
 })
 
 describe('list', () => {
@@ -268,6 +358,26 @@ describe('list', () => {
   it('根目录不存在（还没有任何会话）→ 空列表，不抛错', async () => {
     const store = createJsonlSessionStore({ dir: path.join(dir, 'not-created-yet') })
     expect(await store.list()).toEqual([])
+  })
+
+  it('目录被人工重命名后，list 返回的 id 仍可 open（review Y4）', async () => {
+    // 回归：原先 list 回 header 里的 id，而 open 按目录名拼路径——重命名后
+    // "列表里看得见、打不开"。存储键（目录名）才是可操作键
+    const store = makeStore()
+    await writeRaw('renamed', [
+      JSON.stringify({
+        type: 'session/header',
+        id: 'original',
+        createdAt: '2026-10-17T00:00:00.000Z',
+        provider: 'p',
+        model: 'm',
+        cwd: '.',
+      }),
+    ])
+
+    const metas = await store.list()
+    expect(metas.map((m) => m.id)).toEqual(['renamed'])
+    await expect(store.open(metas[0]!.id)).resolves.toMatchObject({ id: 'renamed' })
   })
 })
 

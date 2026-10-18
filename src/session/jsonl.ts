@@ -26,6 +26,36 @@ export function serializeEvent(event: SessionEvent): string {
 }
 
 /**
+ * 复制一个事件为"与磁盘形态一致"的快照（review Y2）。
+ *
+ * 为什么用序列化往返而不是 `structuredClone`：落盘走的是 `JSON.stringify`，
+ * 因此**序列化后再解析**得到的对象与"重启后从文件读回的形态"逐字段一致
+ * （`undefined` 可选字段被丢弃、`toJSON` 参与等）。用同样的路径造快照，
+ * 才能保证内存缓存与磁盘 JSONL 永远同构——否则 `read()` 的内存结果与 resume
+ * 后的结果可能差一个 `undefined` 字段。
+ *
+ * @param event 调用方传入的事件
+ * @returns 独立的事件副本（与写入磁盘的内容同构）
+ */
+export function cloneEvent(event: SessionEvent): SessionEvent {
+  return JSON.parse(serializeEvent(event)) as SessionEvent
+}
+
+/**
+ * 独占创建文件并写入首个事件（`create` 用，review Y3）。
+ *
+ * `flag: 'wx'` 把"存在性检查 + 创建 + 写入"压成一次**原子**文件操作：并发
+ * `create` 同一 id（两个调用、两个进程）只有一个能成功，另一个得到 `EEXIST`。
+ * 原先的 `access` 预检 + `appendFile` 是 check-then-act，两个调用可能同时通过
+ * 检查并向同一文件追加两条 header（实测 50 轮复现 6 次）。
+ *
+ * @throws 原始 `fs` 错误（`EEXIST` 由 store 翻译为"目标已存在"）
+ */
+export async function createFile(file: string, event: SessionEvent): Promise<void> {
+  await fs.writeFile(file, serializeEvent(event), { encoding: 'utf8', flag: 'wx' })
+}
+
+/**
  * 切分为逻辑行：去掉行尾 `\r`（容忍 `\r\n`），丢弃空行。
  *
  * 空行的两个来源是文件尾的正常换行与崩溃留下的空块，二者都不承载事件。

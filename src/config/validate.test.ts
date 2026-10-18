@@ -82,6 +82,19 @@ describe('validateConfig · 合法输入', () => {
 
     expect(validateConfig(config).model.provider).toBe('deepseek')
   })
+
+  it('plugins[].config 深拷贝：与入参不共享子对象（review Y11）', () => {
+    // 回归：合并在数组上是整值替换，原样透传会让 boot() 的 deepFreeze 冻结
+    // 调用方 flags.plugins[].config，调用方之后修改即抛 TypeError
+    const nested = { servers: { github: { command: 'npx' } } }
+    const config = valid()
+    config.plugins = [{ source: 'builtin:mcp', config: nested }]
+
+    const result = validateConfig(config)
+    expect(result.plugins[0]?.config).toEqual(nested)
+    expect(result.plugins[0]?.config).not.toBe(nested)
+    expect((result.plugins[0]?.config as typeof nested).servers).not.toBe(nested.servers)
+  })
 })
 
 describe('validateConfig · 非法输入的字段路径', () => {
@@ -161,6 +174,15 @@ describe('validateConfig · 非法输入的字段路径', () => {
     config.permissions = { '': 'auto' }
 
     expect(expectInvalid(config).path).toBe('config.permissions.<empty>')
+  })
+
+  it('permissions 键带首尾空白视为配置错误（review Y12：否则 deny 静默退化为兜底 ask）', () => {
+    const config = valid()
+    config.permissions = { ' bash ': 'deny' }
+
+    const err = expectInvalid(config)
+    expect(err.path).toBe('config.permissions. bash ')
+    expect(err.message).toContain('leading or trailing whitespace')
   })
 
   it('plugins 必须是数组且每项有非空 source', () => {

@@ -46,15 +46,43 @@ export function deriveMessages(events: readonly SessionEvent[]): ChatMessage[] {
 
   const start = cut + 1
 
-  // 3. 先扫一遍收集切点之后出现过的全部结果 callId——"有结果"才保留 assistant 的调用声明
-  const resolved = new Set<string>()
+  // 3. **顺序配对**（review Y7）：只有"该声明之后出现了对应结果"的调用才算已执行。
+  //
+  //    为什么不能用"整段日志里出现过同 id 的结果"判断（原实现）：provider 不给
+  //    tool-call id 时，02 的聚合器用 `call_${index}` 兜底，而每个响应都从 index 0
+  //    起算——不同响应的首个调用都叫 `call_0`。于是较早响应留下的 `call_0` 结果，
+  //    会让**较新**响应的 `call_0` 声明被误判为已完成；取消或结果缺失时，投影里就
+  //    出现"有 tool_calls、无对应 tool 消息"的 assistant，provider 直接判 400。
+  //
+  //    配对按事件顺序进行：一个 `tool/result` 只结算**最早一条尚未结算**的同 id
+  //    声明（FIFO）。这样"声明—结果"的时序关系被保留，跨响应的同名 id 不会串台。
+  const pendingDecl = new Map<string, number[]>() // callId -> 待结算的声明序号（FIFO）
+  const resolvedSeq = new Set<number>() // 已拿到结果的声明序号
+  const seqsByEvent = new Map<number, number[]>() // 事件下标 -> 该事件的声明序号
+  let nextSeq = 0
   for (let i = start; i < events.length; i++) {
     const event = events[i]
-    if (event?.type === 'tool/result') resolved.add(event.result.callId)
+    if (!event) continue
+    if (event.type === 'assistant/message') {
+      const seqs: number[] = []
+      for (const call of event.toolCalls ?? []) {
+        const seq = nextSeq++
+        seqs.push(seq)
+        const queue = pendingDecl.get(call.id)
+        if (queue) queue.push(seq)
+        else pendingDecl.set(call.id, [seq])
+      }
+      seqsByEvent.set(i, seqs)
+    } else if (event.type === 'tool/result') {
+      const seq = pendingDecl.get(event.result.callId)?.shift()
+      if (seq !== undefined) resolvedSeq.add(seq)
+    }
   }
 
-  // 4. 线性投影：seen 记录"已投影且尚未被结果消费"的 callId（一对一配对）
-  const pending = new Set<string>()
+  // 4. 线性投影：pending 记录"已投影但尚未被结果消费"的 callId **计数**——
+  //    计数而非 Set，是因为重复 id 时一条结果只能抵消一条声明（Set 会让第二条
+  //    声明永远等不到结果，同样拼出非法请求）
+  const pending = new Map<string, number>()
   for (let i = start; i < events.length; i++) {
     const event = events[i]
     if (!event) continue
@@ -64,7 +92,11 @@ export function deriveMessages(events: readonly SessionEvent[]): ChatMessage[] {
         break
 
       case 'assistant/message': {
-        const calls: ToolCall[] = (event.toolCalls ?? []).filter((call) => resolved.has(call.id))
+        const seqs = seqsByEvent.get(i) ?? []
+        const calls: ToolCall[] = (event.toolCalls ?? []).filter((_call, index) => {
+          const seq = seqs[index]
+          return seq !== undefined && resolvedSeq.has(seq)
+        })
         // 空回复（无内容也无已执行调用）不投影：给模型发一条空 assistant 消息没有意义
         if (event.content === '' && calls.length === 0) break
         out.push(
@@ -72,16 +104,18 @@ export function deriveMessages(events: readonly SessionEvent[]): ChatMessage[] {
             ? { role: 'assistant', content: event.content, toolCalls: calls }
             : { role: 'assistant', content: event.content },
         )
-        for (const call of calls) pending.add(call.id)
+        for (const call of calls) pending.set(call.id, (pending.get(call.id) ?? 0) + 1)
         break
       }
 
       case 'tool/result': {
         const callId = event.result.callId
+        const left = pending.get(callId) ?? 0
         // 孤立结果（其 assistant 在切点之前被截掉，或乱序到达）→ 跳过
-        if (!pending.has(callId)) break
+        if (left === 0) break
         out.push({ role: 'tool', toolCallId: callId, content: event.result.content })
-        pending.delete(callId)
+        if (left === 1) pending.delete(callId)
+        else pending.set(callId, left - 1)
         break
       }
 

@@ -127,6 +127,38 @@ describe('deriveMessages · 请求合法性裁剪', () => {
     const events: SessionEvent[] = [assistant('', ['c0']), toolResult('c0', 'ok')]
     expect(deriveMessages(events)).toHaveLength(2)
   })
+
+  it('重复 callId 按事件顺序配对：更早响应的结果不能证明更晚的声明已完成（review Y7）', () => {
+    // provider 不给 tool-call id 时，02 用 `call_${index}` 兜底，不同响应的首个调用
+    // 都叫 call_0。若按"整段日志里出现过同 id 结果"判断（原实现），第二条声明会
+    // 被误判为已完成，投影出"有 tool_calls 无 tool 消息"的非法 assistant。
+    const events: SessionEvent[] = [
+      assistant('', ['call_0']),
+      toolResult('call_0', '第一次的结果'),
+      assistant('', ['call_0']), // 第二次响应：还没有结果（取消 / 崩溃）
+    ]
+    expect(deriveMessages(events)).toEqual<ChatMessage[]>([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_0', name: 'read', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'call_0', content: '第一次的结果' },
+      // 第二条声明没有结果，且 content 为空 → 整条不投影（不是"带 tool_calls 的空助手"）
+    ])
+  })
+
+  it('重复 callId 且两条都有结果时，一条结果只抵消一条声明（计数而非集合）', () => {
+    const events: SessionEvent[] = [
+      assistant('', ['call_0']),
+      toolResult('call_0', 'A'),
+      assistant('', ['call_0']),
+      toolResult('call_0', 'B'),
+    ]
+    const out = deriveMessages(events)
+    expect(out).toEqual<ChatMessage[]>([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_0', name: 'read', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'call_0', content: 'A' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_0', name: 'read', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'call_0', content: 'B' },
+    ])
+  })
 })
 
 describe('deriveMessages · compaction', () => {

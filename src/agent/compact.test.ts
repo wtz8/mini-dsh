@@ -126,6 +126,36 @@ describe('renderTranscript', () => {
   it('17 · 只有 header 时为空串（触发"不压缩"）', () => {
     expect(renderTranscript([header()])).toBe('')
   })
+
+  // review Y5：原实现只截工具结果，用户/assistant 原文不设限——超大单条输入
+  // 会把摘要请求本身灌爆（它要压的正是"太大"，发给模型的请求却更大）
+  it('17b · 用户 / assistant / 调用参数 / 旧摘要同样受单条上限约束（review Y5）', () => {
+    const long = 'y'.repeat(2000)
+    const text = renderTranscript(
+      [
+        { type: 'compaction', summary: long, boundary: 1 },
+        { type: 'user/message', content: long },
+        {
+          type: 'assistant/message',
+          content: long,
+          toolCalls: [{ id: 'c1', name: 'write', arguments: long }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+      { maxItemChars: 100 },
+    )
+    expect(text).not.toContain(long)
+    expect(text.match(/已截断/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
+  })
+
+  it('17c · 单条上限自动夹到 ≤ 总量预算（"至少保一行"不再放行超长行）', () => {
+    const events: SessionEvent[] = [{ type: 'user/message', content: 'z'.repeat(500) }]
+    // 未夹紧时：一条 500 字符的行超过 maxChars=200 仍会被"至少保一行"整体放行
+    const text = renderTranscript(events, { maxItemChars: 400, maxChars: 200 })
+    // 200 上限 + 截断后缀/前缀的少量开销；对照未修复时的 503 字符
+    expect(text.length).toBeLessThanOrEqual(220)
+    expect(text).toContain('已截断')
+  })
 })
 
 /** 伪 session store：内存数组，记录写入。 */

@@ -52,15 +52,45 @@ export class LlmRegistryImpl implements LlmRegistry {
   }
 }
 
-/** 工具注册表实现：`register` 查重、`list` 只读快照、`get` 未注册抛错。 */
+/** 工具注册表实现：`register` 查重 + 形状校验、`list` 只读快照、`get` 未注册抛错。 */
 export class ToolRegistryImpl implements ToolRegistry {
   readonly #defs: ToolDefinition[] = []
   readonly #byName = new Map<string, ToolDefinition>()
 
-  /** @throws 同名重复注册 */
+  /**
+   * 注册一个工具定义。
+   *
+   * 注册期校验形状（review Y8，与 `PromptRegistry.section` 的 Y10 防线同式）：
+   * `ToolDefinition` 是 TypeScript 接口，外部 JS 插件不受编译约束。畸形定义
+   * （name/description 非字符串、schema 非对象、execute 非函数）此前会一直
+   * 漂移到运行期才在 HTTP 请求构造或调度处炸出，错误信息与罪魁祸首相距甚远。
+   * `concurrency` 可缺省（缺省 = parallel，与调度侧约定一致），但给了就必须是
+   * 两个合法值之一。
+   *
+   * @throws Error 形状非法或同名重复注册（setup 内抛出由组合根转 BootError）
+   */
   register(def: ToolDefinition): void {
-    if (this.#byName.has(def.name)) throw new Error(errDuplicate('tool', def.name))
-    this.#byName.set(def.name, def)
+    if (typeof def !== 'object' || def === null) {
+      throw new Error('tool definition must be an object')
+    }
+    const { name, description, schema, concurrency, execute } = def
+    if (typeof name !== 'string' || name.trim() === '') {
+      throw new Error('tool definition: `name` must be a non-empty string')
+    }
+    if (typeof description !== 'string' || description.trim() === '') {
+      throw new Error(`tool '${name}': \`description\` must be a non-empty string`)
+    }
+    if (typeof schema !== 'object' || schema === null) {
+      throw new Error(`tool '${name}': \`schema\` must be an object`)
+    }
+    if (concurrency !== undefined && concurrency !== 'exclusive' && concurrency !== 'parallel') {
+      throw new Error(`tool '${name}': \`concurrency\` must be 'exclusive' | 'parallel'`)
+    }
+    if (typeof execute !== 'function') {
+      throw new Error(`tool '${name}': \`execute\` must be a function`)
+    }
+    if (this.#byName.has(name)) throw new Error(errDuplicate('tool', name))
+    this.#byName.set(name, def)
     this.#defs.push(def)
   }
 

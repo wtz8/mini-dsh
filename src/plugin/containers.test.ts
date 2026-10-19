@@ -76,6 +76,32 @@ describe('ToolRegistry', () => {
     const reg = new ToolRegistryImpl()
     expect(() => reg.get('nope')).toThrow(/not mounted/)
   })
+
+  // review Y8：与 PromptRegistry.section 的 Y10 防线同式——外部 JS 插件不受
+  // TS 约束，畸形定义要在注册期拒绝，而不是漂移到 HTTP 请求构造处才炸
+  it('注册期校验形状：name/description/schema/execute/concurrency（review Y8）', () => {
+    const reg = new ToolRegistryImpl()
+    const cases: Array<[ToolDefinition, RegExp]> = [
+      [{ ...toolDef('t'), name: '' } as ToolDefinition, /`name` must be a non-empty string/],
+      [{ ...toolDef('t'), name: 42 } as unknown as ToolDefinition, /`name` must be a non-empty string/],
+      [{ ...toolDef('t'), description: '' } as ToolDefinition, /`description` must be a non-empty string/],
+      [{ ...toolDef('t'), schema: null } as unknown as ToolDefinition, /`schema` must be an object/],
+      [{ ...toolDef('t'), execute: undefined } as unknown as ToolDefinition, /`execute` must be a function/],
+      [
+        { ...toolDef('t'), concurrency: 'sometimes' } as unknown as ToolDefinition,
+        /`concurrency` must be 'exclusive' \| 'parallel'/,
+      ],
+      [null as unknown as ToolDefinition, /must be an object/],
+    ]
+    for (const [def, pattern] of cases) {
+      expect(() => reg.register(def)).toThrow(pattern)
+    }
+    // 全部被拒 ⇒ 注册表保持空
+    expect(reg.list()).toHaveLength(0)
+    // 合法形态（含可选 concurrency）不受影响
+    reg.register({ ...toolDef('ok'), concurrency: 'exclusive' })
+    expect(reg.list()).toHaveLength(1)
+  })
 })
 
 describe('PromptRegistry', () => {

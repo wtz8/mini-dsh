@@ -33,6 +33,17 @@ export const DOUBLE_INTERRUPT_MS = 2000
  */
 export const SHUTDOWN_TIMEOUT_MS = 3000
 
+/**
+ * `boot()` 的兜底超时（毫秒，review Y9）。
+ *
+ * 与 O5 同理但发生在**启动期**：内核 `boot` 失败时会对已挂载插件逆序 dispose
+ * （R3 清理），该清理不设超时——单个挂起的 `dispose` 会让 `boot()` 永不返回，
+ * 用户连 REPL 都进不去也没有任何输出。超时后按启动失败处理（退出码 1 + 诊断）。
+ * 取值比 shutdown 宽：boot 还包含本地插件的动态 import（冷启动 + 杀软扫描下
+ * 文件读可能慢到秒级）。
+ */
+export const BOOT_TIMEOUT_MS = 15_000
+
 /** 工具结果与审批提示里，单行文案的字符上限（§4.3 / §4.6）。 */
 export const ONE_LINE_CHARS = 120
 /** 审批提示里参数预览的字符上限（比结果行宽，因为要看全参数）。 */
@@ -80,11 +91,12 @@ export interface CliFlags {
  * 行读取器（§3.3）：REPL 与审批共用同一队列。
  *
  * 与 `node:readline` 的区别：readline 需要在"REPL 读行"与"审批提问"两条消费
- * 路径之间 `pause/resume` 并自己接管未消费的缓冲；行泵把"缓冲队列 + 单一等待者"
- * 收在一处，且能直接吃 `Readable.from([...])` 做单测（D6）。
+ * 路径之间 `pause/resume` 并自己接管未消费的缓冲；行泵把"缓冲队列 + FIFO 等待者
+ * 队列"收在一处，且能直接吃 `Readable.from([...])` 做单测（D6）。
  *
  * REPL 与审批**在时间上互斥**（REPL 只在回合外读行、审批只在回合内提问），
- * 行泵仍按队列实现，是为了让回合进行中用户提前敲入的行被缓冲而非丢掉。
+ * 但审批之间**可能并发**（`maxParallel > 1` 时一步内多个工具同时 `ask`，
+ * review Y7），所以等待者必须是队列——单槽会被后到者覆盖。
  */
 export interface LineReader {
   /**

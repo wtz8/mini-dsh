@@ -139,7 +139,9 @@ export function createAgentControl(deps: AgentDeps): AgentControlHandle {
           const system = ctx.prompt.render()
           const tools = toToolSchemas(ctx.tools.list())
 
-          // ② 压缩检查（设计 D4：与本次投影复用同一次 read，零额外 IO）
+          // ② 压缩检查（设计 D4）。注意这里**重读一次** log 而非复用 ① 的投影：
+          // compactSession 需要全量事件（含本回合已落的 user/message），而 ① 只留了
+          // 投影结果；一次 read 换不来两用，宁可多读一次（store 有缓存时开销可忽略）
           const estimated = estimateRequestTokens({ system, messages, tools })
           if (
             !compacted &&

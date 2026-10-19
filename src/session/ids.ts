@@ -16,6 +16,9 @@ function pad(value: number, width = 2): string {
   return String(value).padStart(width, '0')
 }
 
+/** base36 字符表（随机段逐字符取样用，review Y10）。 */
+const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz'
+
 /**
  * 生成一个会话 id。
  *
@@ -25,12 +28,10 @@ function pad(value: number, width = 2): string {
 export function createSessionId(now: Date = new Date()): string {
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
   const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  // Math.random().toString(36) 在极小数（<1e-7）时会退化为科学计数法并带 'e'/'-'/'.'，
-  // 故先滤掉非 [0-9a-z] 字符再取 6 位；不足 6 位时右侧补 '0'（概率极低，仅为保格式稳定）。
-  const rand = Math.random()
-    .toString(36)
-    .replace(/[^0-9a-z]/g, '')
-    .slice(0, 6)
-    .padEnd(6, '0')
+  // 逐字符均匀取样（review Y10）：原实现 `Math.random().toString(36)` 滤掉非
+  // [0-9a-z] 后取 6 位，但十进制小数 toString 的整数部分恒为 "0"——随机段首字符
+  // 恒 '0'，同秒碰撞空间缩 36 倍（实测 2 万个样本首字符集合 = {'0'}）。逐字符
+  // 取样让 6 位都用满 base36；科学计数法的 'e'/'-'/'.' 问题也随之消失
+  const rand = Array.from({ length: 6 }, () => BASE36.charAt(Math.floor(Math.random() * 36))).join('')
   return `${date}-${time}-${rand}`
 }

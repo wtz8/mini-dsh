@@ -1,6 +1,9 @@
+import { Readable } from 'node:stream'
+
 import type { ToolInvocation } from '../contracts.js'
 import { describe, expect, it } from 'vitest'
 
+import { createLineReader } from './io.js'
 import { createApproveHandler } from './approve.js'
 import type { CliIO, LineReader } from './types.js'
 
@@ -102,5 +105,30 @@ describe('createApproveHandler', () => {
     await expect(approve(invocation())).resolves.toBe(false)
     // 两次都写了 prompt（未命中任何缓存）
     expect(out.filter((line) => line === '允许？[y/N] ')).toHaveLength(2)
+  })
+
+  // review Y7/Y8：默认配置（permissions 空 ⇒ 全工具 ask、maxParallel 4）下一步内
+  // 会有多个工具并发走到审批。单槽等待者会丢掉前 N-1 个（60s 假死）；
+  // 行泵 FIFO 队列 + 审批闸门共同保证：一次只问一个，答案与工具一一对应。
+  it('并发审批接真实行泵：串行提问、FIFO 取行、答案一一对应', async () => {
+    const input = new Readable({ read() {} })
+    const written: string[] = []
+    const io: CliIO = {
+      out: (text) => written.push(text),
+      err: () => undefined,
+      lines: createLineReader(input, (text) => written.push(text)),
+      isTTY: true,
+    }
+    const approve = createApproveHandler(io)
+    const first = approve(invocation())
+    const second = approve(invocation())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // 闸门：第一个问题已打出，第二个被压住（一次只问一个，避免提示交错）
+    expect(written.filter((w) => w.includes('允许？'))).toHaveLength(1)
+    // 两行输入到达：第一行归第一问，第二行归第二问（先来后到）
+    input.push('y\nn\n')
+    await expect(first).resolves.toBe(true)
+    await expect(second).resolves.toBe(false)
+    expect(written.filter((w) => w.includes('允许？'))).toHaveLength(2)
   })
 })

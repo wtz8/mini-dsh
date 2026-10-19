@@ -124,6 +124,9 @@ async function* iterate(
   const decoder = new TextDecoder('utf-8')
   const parser = new SseParser()
   let ended = false
+  // 是否见过至少一个 data 帧（含被容忍的 `data: null` 空闲帧）——
+  // 用于识别"HTTP 200 但响应体根本不是 SSE"的坏网关（review Y6，见流末判定）
+  let sawData = false
   try {
     while (!ended) {
       const { done, value } = await reader.read()
@@ -135,6 +138,7 @@ async function* iterate(
           ended = true
           break
         }
+        sawData = true
         for (const event of frameEvents(frame.data)) yield event
       }
       if (done) break
@@ -144,6 +148,18 @@ async function* iterate(
   } finally {
     // 关流：正常结束 / 提前 break / abort 都会走到这里；cancel 幂等，失败无副作用
     await reader.cancel().catch(() => undefined)
+  }
+  // 流提前 EOF 且未收到 [DONE]：先区分"没产出"与"产出后早退"——
+  //
+  // 整条流没出现过任何 data 帧（review Y6）：HTTP 200 而响应体不是 SSE（网关忽略
+  // `stream:true` 回了整块 JSON、软限流回 HTML 页）时解析器零产出；若当空流成功，
+  // 06 会落一条空 assistant + usage 0 并判定回合成功——协议错误被降级成"正常空
+  // 结果"，除了一次毫无动静的回合外没有任何诊断线索。宁可判 `protocol` 上抛。
+  // 调用前已 abort 的流不算协议错误（取消语义优先，由 06 归为 interrupted）。
+  if (!ended && !sawData && !req.signal.aborted) {
+    throw new LlmError('LLM response contained no SSE data frames (non-SSE body despite HTTP 200?)', {
+      kind: 'protocol',
+    })
   }
   // 流提前 EOF 且未收到 [DONE]：补一次 end，保证 06 总能收到终止信号
   if (!ended) yield { type: 'end' }

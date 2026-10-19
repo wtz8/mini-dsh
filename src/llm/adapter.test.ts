@@ -230,6 +230,40 @@ describe('adapter · 错误分类', () => {
     expect((err as LlmError).kind).toBe('protocol')
   })
 
+  // review Y6：HTTP 200 但响应体不是 SSE（网关忽略 stream:true 回整块 JSON、
+  // 软限流回 HTML 页）——SSE 解析器零产出。修复前会当空流成功（06 落一条
+  // 空 assistant + usage 0，回合判定成功），协议错误被降级成"正常空结果"。
+  it('HTTP 200 但响应体非 SSE：kind=protocol，不当空流成功（review Y6）', async () => {
+    vi.stubEnv(KEY_ENV, 'sk-test')
+    const { fetchImpl } = makeFetch(() =>
+      new Response('{"choices":[{"message":{"content":"hi"}}]}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    const err = await collect(createOpenAiAdapter(model, { fetchImpl }), request()).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(LlmError)
+    expect((err as LlmError).kind).toBe('protocol')
+    expect((err as LlmError).message).toContain('no SSE data frames')
+  })
+
+  it('HTTP 200 且空响应体（零帧 EOF）：同样判 protocol，不留"正常空回合"假象', async () => {
+    vi.stubEnv(KEY_ENV, 'sk-test')
+    const { fetchImpl } = makeFetch(() => new Response('', { status: 200 }))
+
+    const err = await collect(createOpenAiAdapter(model, { fetchImpl }), request()).catch((e: unknown) => e)
+    expect((err as LlmError).kind).toBe('protocol')
+  })
+
+  it('仅 [DONE] 的流保持容忍语义（有 SSE 帧形态，不因零产出判死）', async () => {
+    vi.stubEnv(KEY_ENV, 'sk-test')
+    const { fetchImpl } = makeFetch(() => sseResponse(['data: [DONE]\n\n']))
+
+    const events = await collect(createOpenAiAdapter(model, { fetchImpl }), request())
+    expect(events).toEqual([{ type: 'end' }])
+  })
+
   it('API key 未设置：调用 stream() 时同步抛（D4），且一次请求都不发', async () => {
     vi.stubEnv(KEY_ENV, undefined)
     const { fetchImpl, calls } = makeFetch(() => sseResponse(['data: [DONE]\n\n']))

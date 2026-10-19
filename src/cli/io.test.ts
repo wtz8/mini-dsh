@@ -98,5 +98,62 @@ describe('createLineReader', () => {
     expect(input.listenerCount('data')).toBe(0)
     expect(input.listenerCount('end')).toBe(0)
     expect(input.listenerCount('close')).toBe(0)
+    expect(input.listenerCount('error')).toBe(0)
+  })
+
+  // review Y7：并发审批场景。单槽等待者会被后到的 ask() 覆盖——前一个的
+  // resolve 被静默丢弃，只能等 60s 审批超时。队列化后每个等待者各得一行。
+  it('⑮b 并发 ask 各得一行（FIFO，后到者不覆盖先到者）', async () => {
+    const prompts: string[] = []
+    const input = new Readable({ read() {} })
+    const lines = createLineReader(input, (text) => prompts.push(text))
+    const a = lines.ask('Q1 ')
+    const b = lines.ask('Q2 ')
+    input.push('y\nn\n')
+    expect(await a).toBe('y')
+    expect(await b).toBe('n')
+    expect(prompts).toEqual(['Q1 ', 'Q2 '])
+    lines.close()
+  })
+
+  it('⑮c interrupt 打断全部进行中的 ask，next 留在队列里继续等', async () => {
+    const input = new Readable({ read() {} })
+    const lines = createLineReader(input)
+    const a = lines.ask('Q1 ')
+    const b = lines.ask('Q2 ')
+    const c = lines.next()
+    lines.interrupt()
+    expect(await a).toBeNull()
+    expect(await b).toBeNull()
+    // next 不被打断（否则 REPL 会误判 EOF 退出），由后续输入结算
+    input.push('later\n')
+    expect(await c).toBe('later')
+    lines.close()
+  })
+
+  // review Y7：逐 chunk toString('utf8') 会把半个汉字拆成 U+FFFD（中文输入被
+  // 静默破坏并永久进 log）；StringDecoder 把残缺字节留到下一片拼回。
+  it('⑮d 多字节字符被 chunk 边界切断：拼回完整汉字，不出现替换符', async () => {
+    const bytes = Buffer.from('你好\n', 'utf8') // 「你」= E4 BD A0
+    const chunks = [bytes.subarray(0, 1), bytes.subarray(1)]
+    const input = new Readable({
+      read() {
+        this.push(chunks.shift() ?? null)
+      },
+    })
+    const lines = createLineReader(input)
+    expect(await lines.next()).toBe('你好')
+    lines.close()
+  })
+
+  it('⑮e 流出错（stdin 故障）时等待者按 EOF 结算，不永久挂住', async () => {
+    const input = new Readable({ read() {} })
+    const lines = createLineReader(input)
+    const pending = lines.ask('?')
+    input.emit('error', new Error('device gone'))
+    expect(await pending).toBeNull()
+    // 此后按 EOF 语义：恒为 null
+    expect(await lines.next()).toBeNull()
+    lines.close()
   })
 })

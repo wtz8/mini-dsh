@@ -305,6 +305,14 @@ boot({ ...最小 config, plugins: [{ source: '<toy 文件路径>' }] })
 | Y4 | `PromptRegistry.section` 增加**形状校验**（id 非空 / order 有限数值 / render 是函数）并存**冻结副本** | 外部 JS 插件不受 TS 约束：`order: NaN` 时比较器返回 `NaN`（JS sort 视为相等），"同 order 按 id 字典序"被绕过，段序退化为注册顺序 | 探针 F-17：修复前 `[NaN, 1, 0]` 渲染为 `A,C,B`（按注册序）；修复后注册即抛 `order must be a finite number` |
 | Y5 | `contracts.ts` 两处 JSDoc 澄清（**无签名改动**）：`Unsubscribe` 补"旧句柄不影响其后新建的订阅"；`Plugin.dispose` 补"不得等待 `ctx.signal`" | 前者是 Y1 的契约落点；后者是 Y2 的时序派生义务——`shutdown` 在全部 dispose 返回**之后**才 abort，在 dispose 里等该信号会死锁（评审 F-09 的第二问）。不改签名，仅补语义 | — |
 
+### 评审修复追加（2026-10-19 外部全模块审查）
+
+| # | 修复 | 说明 | 实证 |
+|---|---|---|---|
+| Y6 | `createLogger` 的级别兜底改用 `Object.hasOwn(LEVEL_WEIGHT, level)` 判定 | 原实现 `LEVEL_WEIGHT[level] ?? LEVEL_WEIGHT.info` 拦不住**原型键名**：level 为 `'toString'` 等时索引命中 `Object.prototype.toString`（真值函数），`LEVEL_WEIGHT[lv] < threshold` 对 number vs function 恒 false——**全部日志被静默关闭**。level 是 config 的运行时值（01 从 JSON 解析），TS 的 `LogLevel` 类型挡不住 | 探针：`logLevel='toString'` 时 error/info 均 0 行输出；修复后按 info 兜底（已补 `logger.test.ts` 回归） |
+| Y7 | `emit` 对 async 监听器 rejection 的挂 catch 改经 `Promise.resolve(ret)` 适配 | 原实现裸调 `ret.catch`（Y3 修复）：监听器返回**非标准 thenable**（有 then 无 catch）时，裸调在 try 里同步抛 TypeError——被误记成"监听器抛错"，而真正的 rejection 仍逃逸为 unhandledRejection（Y3 没堵全的形态） | 探针：thenable 无 catch 时修复前 log.error 记录的是 TypeError 且 rejection 逃逸；修复后记录原始错误、零逃逸（已补 `event-bus.test.ts` 回归） |
+| Y8 | `ToolRegistry.register` 增加形状校验（name/description 非空字符串、schema 对象、concurrency 两值之一、execute 函数） | 与 `PromptRegistry.section` 的 Y4 防线**不对称**：`ToolDefinition` 同样是 TS 接口，外部 JS 插件不受编译约束——畸形定义此前漂移到 HTTP 请求构造或调度处才炸，错误信息与罪魁祸首相距甚远 | 已补 1 例 7 种畸形 + 合法形态的注册回归（`containers.test.ts`） |
+
 **本次对 00 的 4 条（F-07/09/10/17）逐条实证全部成立，无证伪项**；报告里另两条 P3（HTTP 错误体全量读入、`usage`/`index` 只查有限数值）属 02 的线格式取舍，结论记在 `02-llm.md` §7。
 
 

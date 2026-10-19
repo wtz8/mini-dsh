@@ -46,7 +46,7 @@ export function deriveMessages(events: readonly SessionEvent[]): ChatMessage[] {
 
   const start = cut + 1
 
-  // 3. **顺序配对**（review Y7）：只有"该声明之后出现了对应结果"的调用才算已执行。
+  // 3. **顺序配对**（review Y7 / Y9）：只有"该声明之后出现了对应结果"的调用才算已执行。
   //
   //    为什么不能用"整段日志里出现过同 id 的结果"判断（原实现）：provider 不给
   //    tool-call id 时，02 的聚合器用 `call_${index}` 兜底，而每个响应都从 index 0
@@ -54,9 +54,14 @@ export function deriveMessages(events: readonly SessionEvent[]): ChatMessage[] {
   //    会让**较新**响应的 `call_0` 声明被误判为已完成；取消或结果缺失时，投影里就
   //    出现"有 tool_calls、无对应 tool 消息"的 assistant，provider 直接判 400。
   //
-  //    配对按事件顺序进行：一个 `tool/result` 只结算**最早一条尚未结算**的同 id
-  //    声明（FIFO）。这样"声明—结果"的时序关系被保留，跨响应的同名 id 不会串台。
-  const pendingDecl = new Map<string, number[]>() // callId -> 待结算的声明序号（FIFO）
+  //    配对按事件顺序进行：一个 `tool/result` 只结算**最近一条尚未结算**的同 id
+  //    声明（LIFO，review Y9——原 FIFO/shift 在"崩溃留下未结算声明 + resume 后同
+  //    id 重新声明且带文本"时，会把新结果记到旧声明头上，线性投影产出
+  //    `[A(toolCalls), B(text), tool]`——tool 消息不紧跟声明它的 assistant，
+  //    provider 判 400 且每次 resume 永久复现；LIFO 记到最近声明，tool 结果天然
+  //    落在其声明者之后）。正常时序下（结果夹在两次声明之间到达）LIFO 与 FIFO
+  //    的结算结果相同，既有重复 callId 用例行为不变。
+  const pendingDecl = new Map<string, number[]>() // callId -> 待结算的声明序号（LIFO 栈）
   const resolvedSeq = new Set<number>() // 已拿到结果的声明序号
   const seqsByEvent = new Map<number, number[]>() // 事件下标 -> 该事件的声明序号
   let nextSeq = 0
@@ -74,7 +79,7 @@ export function deriveMessages(events: readonly SessionEvent[]): ChatMessage[] {
       }
       seqsByEvent.set(i, seqs)
     } else if (event.type === 'tool/result') {
-      const seq = pendingDecl.get(event.result.callId)?.shift()
+      const seq = pendingDecl.get(event.result.callId)?.pop()
       if (seq !== undefined) resolvedSeq.add(seq)
     }
   }

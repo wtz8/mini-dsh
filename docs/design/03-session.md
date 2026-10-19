@@ -1,6 +1,6 @@
 # 03-session 设计
 
-> 状态：**Baseline**（2026-10-17 随模块提交归档；§8 的 Q1–Q10 由所有者全部按建议项拍板，Q1 的基线修订见 §2.5；实现期偏离 X1–X2、review 期修复 Y1 见 §7 偏离记录）
+> 状态：**Baseline**（2026-10-17 随模块提交归档；§8 的 Q1–Q10 由所有者全部按建议项拍板，Q1 的基线修订见 §2.5；实现期偏离 X1–X2、review 期修复 Y1–Y10 见 §7 偏离记录，其中 Y9–Y10 为 2026-10-19 外部全模块审查追加）
 > 预算：~1.5k 行（架构 §4；本次范围预计 ~0.75k，见 §7 预算说明）
 > 上游依赖：`00-skeleton.md`（Baseline，重点 §5.2 的 `SessionStore` / `SessionStoreContainer.mount` 委托式容器、§5.4 的 Session log 事件表）、`01-config.md`（Baseline，重点 §2.3 Config 字段增补规则）、`02-llm.md`（Baseline，重点 §2 出口面约定与 §7 的 X2/X3：插件侧能力经 `src/index.ts` 转发、内置模块用 `registerBuiltin()` 显式注册并返回退订句柄）、`architecture.md` 0.1.5（§5.2 服务面、§5.3 通知事件表、§5.4 事件表、§6 数据流、§7 存储布局、§11-Q4）
 
@@ -398,6 +398,13 @@ fixture：`tests/integration/session-fixtures/`（与 01 的 `config-fixtures/`�
 | Y6 | **（P2）退订句柄不幂等**：按回调函数身份删订阅，"退订 → 同一函数重新订阅 → 再调旧句柄"会删掉新订阅 | `subscribe` 每次注册包一层独立 token，句柄按 token 删除（与内核 `EventBus` 的 Y1 同式）；派发仍是快照遍历，退订只影响后续事件 | 探针 F-07（session 侧同式）：旧句柄再调后 hits 由 0 变 1（已补回归） |
 | Y7 | **（P2）async 订阅者的 rejection 逃逸**：签名返回 `void` 但 TS 允许 async 函数，抛错不进同步 `try/catch`，成为 `unhandledRejection`，`onError` 收不到 | `#dispatch` 检测 thenable 并显式挂 `catch` 转 `onError`（与内核 `EventBus` 的 Y3 同式） | 探针 F-10（同式）：修复前 `onError` 0 次、unhandledRejection 1 次；修复后 1 / 0（已补回归） |
 | Y8 | **（P2）投影用"整段日志出现过同 id 结果"判断调用已完成**：02 的兜底 id `call_${index}` 在不同响应间重复（都从 0 起算），较早响应的结果会让较新响应的同 id 声明被误判为已完成——取消或结果缺失时，投影出"有 tool_calls、无 tool 消息"的 assistant，provider 判 400 | 改为**顺序配对**：一个 `tool/result` 只结算最早一条尚未结算的同 id 声明（FIFO），声明必须"之后"有结果才算已执行；`pending` 由 Set 改为**计数 Map**（重复 id 时一条结果只抵消一条声明） | 既有的"部分结果"/"孤立结果"用例语义不变；新增 2 例：重复 id 跨响应、重复 id 各有一条结果 |
+
+### 评审修复追加（2026-10-19 外部全模块审查）
+
+| # | 问题 | 修复 | 证据 |
+|---|---|---|---|
+| Y9 | **（P2）Y8 的顺序配对用 FIFO，在"崩溃留下未结算声明 + resume 后同 id 重新声明且带文本"时产出非法序列**：新结果被记到最早（旧）声明头上，线性投影产出 `[A(toolCalls), B(text), tool]`——tool 消息不紧跟声明它的 assistant（provider 判 400），且**每次 resume 永久复现**（模型"边说话边调工具"的常见形态恰好触发） | 配对由 FIFO（`shift`）改 **LIFO（`pop`）**：一条 `tool/result` 结算**最近**一条尚未结算的同 id 声明，结果天然落在其声明者之后。正常时序（结果夹在两次声明之间到达）LIFO 与 FIFO 的结算结果相同，Y8 的既有重复 callId 用例行为不变 | 探针（真实 `deriveMessages`）：崩溃场景修复前产出非法序列（tool 不紧跟声明者）、修复后合法；已补 1 例回归（"崩溃后同 id 重声明"） |
+| Y10 | **（P3）id 随机段首字符恒为 `'0'`**：`Math.random().toString(36)` 滤掉非 `[0-9a-z]` 后取 6 位，而十进制小数的整数部分恒为 `"0"`——实测 20000 个样本随机段首字符集合 = `{'0'}`，同秒碰撞空间比 §4.1 宣称的 6 位 base36 **缩 36 倍** | 改为**逐字符均匀取样**（`BASE36.charAt(floor(random()*36))` × 6）：6 位都用满 base36；科学计数法带 `e`/`-`/`.` 的极端分支也随之消失 | 探针：2 万样本首字符恒 `'0'`；修复后 200 样本首字符分布超过 10 个不同值（已补分布回归） |
 
 **评审排除的误报**（探针证伪，记录以免后续重复怀疑）：
 

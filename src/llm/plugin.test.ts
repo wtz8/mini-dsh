@@ -29,10 +29,19 @@ function ctxWithRegistry(): { ctx: Ctx; registry: LlmRegistryImpl } {
 function fakeFetch(calls: { count: number }): FetchLike {
   const fetchImpl = (() =>
     Promise.resolve(
-      new Response(new ReadableStream<Uint8Array>({ start: (c) => c.close() }), {
-        status: 200,
-        headers: { 'content-type': 'text/event-stream' },
-      }),
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start: (c) => {
+            // 真发一个 [DONE] 帧：零帧空体在 02 review Y6 之后按协议错误处理
+            c.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+            c.close()
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      ),
     )) as unknown as FetchLike
   return ((url: string | URL | Request, init?: RequestInit) => {
     calls.count += 1

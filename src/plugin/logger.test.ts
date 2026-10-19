@@ -63,6 +63,16 @@ describe('createLogger · 级别过滤', () => {
     log.info('i')
     expect(capture.lines).toEqual(['[info] i\n'])
   })
+
+  // review Y6：level 撞上 Object 原型键名（如 'toString'）时，`??` 兜底不生效
+  // （取到原型上的函数，恒真），全部日志会被静默关闭
+  it('原型键名级别（toString 等）同样兜底为 info，不静默关掉全部日志（review Y6）', () => {
+    const log = createLogger('toString' as 'info')
+    log.debug('d')
+    log.info('i')
+    log.error('e')
+    expect(capture.lines).toEqual(['[info] i\n', '[error] e\n'])
+  })
 })
 
 describe('createLogger · 输出格式与 meta', () => {

@@ -1,6 +1,6 @@
 # 06-agent 设计
 
-> 状态：**Baseline**（2026-10-18 所有者拍板 **Q1–Q13 全部按建议项通过**；2026-10-18 晚所有者 review 代码完成，评审期修复 **Y1–Y2** 已回写 §7，待提交归档）
+> 状态：**Baseline**（2026-10-18 所有者拍板 **Q1–Q13 全部按建议项通过**；2026-10-18 晚所有者 review 代码完成，评审期修复 **Y1–Y6** 已回写 §7——其中 Y5–Y6 为 2026-10-19 外部全模块审查追加，待提交归档）
 > 预算：~2.0k 行（架构 §4；本次范围预计 ~1.5k，见 §7 预算说明）
 > 上游依赖：`00-skeleton.md`（Baseline，重点 §5 组合根与 dispose 约定、X5 半失败插件）、`01-config.md`（Baseline，重点 `Config.compaction` / `Config.tools.maxParallel` / `resolvePermission`）、`02-llm.md`（Baseline，重点 §2.2 `createToolCallAccumulator` 插件侧出口、D7"provider 自检归使用点"、`LlmError.kind`）、`03-session.md`（Baseline，重点 §4.4 `deriveMessages` 的配对与截断规则、`SessionError`）、`04-prompt.md`（Baseline，重点 §2.2 `PROMPT_ORDER`、`render()` 每步现拼）、`05-tools.md`（Baseline，**重点 §4.3 审批通道接线与 §8 附则"与 06 的职责边界"**）、`architecture.md` 0.1.5（§5.2 取消信号边界与 `AgentRegistry`/`AgentControl`、§5.3 瀑布、§5.4 事件表、§6 一个回合的数据流）
 
@@ -583,6 +583,13 @@ dispose():
 | Y2 | 三处注释/JSDoc 与实现不符的订正（无行为变更） | ①`types.ts` 与 `loop.ts` 的 `AgentControlHandle` 说明把偏离号写成 **X2**（压缩切点），实为 **X5**；②`schedule.ts` "屏障 1"注释写"可能抛出前面调用的错误"，X4 改成"收集后收尾上抛"后已不成立；③`loop.ts` 的 `run()` 上方有两个连续的 JSDoc 块（前一个悬空），合并为一个。另删 `tokens.ts` 一处冗余类型断言 |
 | Y3 | **控制面带出 `sessionId`（`AgentControl` 新增 `readonly sessionId: string`）** ——Baseline 后修订，源自 07 评审期 Y4，架构文档同步至 **0.1.7** | 会话在本插件 `setup()` 内 create/open（§8-Q1），`session/header` 因此在 `boot()` 期间就写完，07 的渲染订阅挂载于 boot 之后**永远收不到**——07 的 `/session` 与横幅一度只能显示 `unknown`（07 X2）。此后 07 退化为"从 `sessions.list()` 推定最新一条"，残留同毫秒 `createdAt` 取错的边界（07 Y1）。本插件的闭包本就持有 `session.id`，只需在 `loop.ts` 的 handle 里带出即可，**纯新增字段、不改既有签名**。影响面：`contracts.ts` 与 `src/plugin/containers.test.ts` 的手写 `AgentControl` 字面量各补一处。对 08/09 亦有用：插件要知道"当前会话"时不必自己猜 |
 | Y4 | **集成链路 4（取消）改为"等首片真的到达"再取消，不再 sleep 50ms** ——Baseline 后修订，测试夹具加固，无实现改动 | 原写法 `await new Promise((r) => setTimeout(r, 50))` 是在赌"50ms 内首片一定到了"。全量并行跑 60 个测试文件时负载高，取消可能比首片更早，此刻回合还没产出任何文本，落进 §5 边界表 19 的**空回合**（`turn/start` + `user/message` + `turn/end`，**无 assistant/message**），`events.find(e => e.type === 'assistant/message')` 拿到 `undefined` ⇒ 偶发红灯（实测约 1/7 概率，14 次全量中红 2 次）。改为订阅 `stream/chunk` 事件、收到第一个 text 增量后才 `cancel()`——等真实信号而非等时间。修复后连跑 5 次全量全绿 |
+
+### 评审修复追加（2026-10-19 外部全模块审查）
+
+| # | 偏离 | 理由与影响 |
+|---|---|---|
+| Y5 | **`renderTranscript` 只截工具结果，user/assistant 原文与调用参数不设限**（P3）：超大单条输入（粘贴整份文件）会把摘要请求**本身**灌爆——压缩要压的正是"太大"，发给模型的摘要请求却更大，`compactSession` 对该会话从此每回合失败一次（空烧一次请求）；另调用参数硬编码 200 截断、"至少保一行"守卫会把超过 `maxChars` 的单行原样放行（总量预算被单行绕过） | 每条入栈前统一截断到 `maxItemChars`（user/assistant/调用参数/旧 compaction 摘要/工具结果），且 `maxItemChars` 自动夹到 ≤ `maxChars`——单行超预算的绕行口被关死。已补 2 例回归（17b 各形态截断、17c 单条上限夹紧）；16 号"从最旧开始丢"用例语义不变 |
+| Y6 | `loop.ts` 压缩检查处注释订正（无行为变更）：原注释称"与本次投影复用同一次 read，零额外 IO"，实际 `compactSession` 的 `events` 是**重读一次** log（① 处只留了投影结果，不含事件序列） | 与 Y2 同类的"说明与实现不符"。修正注释为如实描述；行为保持"多读一次"（store 读是本地小文件，不值得为省一次读改 ① 的结构） |
 
 ### 评审排除的误报（第二轮，探针实证）
 

@@ -159,6 +159,27 @@ describe('deriveMessages · 请求合法性裁剪', () => {
       { role: 'tool', toolCallId: 'call_0', content: 'B' },
     ])
   })
+
+  // review Y9：崩溃留下未结算声明、resume 后同 id 重新声明（且新声明者带文本——
+  // 模型"边说话边调工具"的常见形态）。原 FIFO 配对把新结果记到旧声明头上，
+  // 投影出 tool 消息不紧跟声明者的非法序列，provider 判 400 且每次 resume 复现。
+  it('崩溃后同 id 重声明：结果记到最近声明，tool 消息紧跟其声明者（review Y9）', () => {
+    const events: SessionEvent[] = [
+      { type: 'turn/start', turnNo: 1 },
+      { type: 'user/message', content: 'q' },
+      assistant('', ['call_0']), // 旧声明：崩溃/取消，结果未落盘
+      { type: 'turn/end', turnNo: 1 },
+      { type: 'turn/start', turnNo: 2 },
+      assistant('我先查一下文件。', ['call_0']), // resume 后同 id 重声明，带文本
+      toolResult('call_0', 'a.ts'),
+    ]
+    expect(deriveMessages(events)).toEqual<ChatMessage[]>([
+      { role: 'user', content: 'q' },
+      // 旧声明无结果：不投影（content 为空且无已执行调用）
+      { role: 'assistant', content: '我先查一下文件。', toolCalls: [{ id: 'call_0', name: 'read', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'call_0', content: 'a.ts' },
+    ])
+  })
 })
 
 describe('deriveMessages · compaction', () => {

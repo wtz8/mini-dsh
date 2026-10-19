@@ -18,7 +18,7 @@ import { USAGE, parseFlags } from './flags.js'
 import { createProcessIO } from './io.js'
 import { createCli } from './repl.js'
 import type { CliIO, ProjectAudit } from './types.js'
-import { BUILTIN_PREFIX, SHUTDOWN_TIMEOUT_MS, VERSION } from './types.js'
+import { BOOT_TIMEOUT_MS, BUILTIN_PREFIX, SHUTDOWN_TIMEOUT_MS, VERSION } from './types.js'
 
 /**
  * 启动序列与退出流程（架构 §5.5 / §4.1）。
@@ -203,6 +203,28 @@ async function shutdownWithTimeout(ctx: Ctx, io: CliIO): Promise<void> {
 }
 
 /**
+ * 带超时的 `boot`（review Y9）：boot 失败时内核会逆序 dispose 已挂载插件（R3），
+ * 该清理与 `shutdown` 一样不设超时——单个挂起的 dispose 会让 `boot()` 永不返回，
+ * 启动期挂死（连 REPL 都进不去、无任何输出）。超时按启动失败处理；此时后台
+ * 的 boot 仍在挂着，靠 bin 的 `process.exit` 收尸。
+ *
+ * @throws 超时抛 Error（会被 main 的启动失败分支接住）；boot 自身的 BootError 原样上抛
+ */
+async function bootWithTimeout(config: Config): Promise<Ctx> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`插件挂载超过 ${BOOT_TIMEOUT_MS}ms 未返回（某个 setup/dispose 挂起？），按启动失败处理`))
+    }, BOOT_TIMEOUT_MS)
+  })
+  try {
+    return await Promise.race([boot(config), timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/**
  * 进程入口。
  *
  * @param argv 命令行参数（不含 `node` 与脚本路径）
@@ -277,10 +299,10 @@ export async function main(argv: readonly string[], io?: CliIO): Promise<number>
     return 1
   }
 
-  // ⑥ boot（失败时 boot 内部已逆序 dispose，R3）
+  // ⑥ boot（失败时 boot 内部已逆序 dispose，R3；超时兜底见 bootWithTimeout）
   let ctx: Ctx
   try {
-    ctx = await boot(config)
+    ctx = await bootWithTimeout(config)
   } catch (err) {
     activeIO.err(`${describeError(err).text}\n`)
     for (const off of builtinUnsubs) off()
@@ -302,7 +324,7 @@ export async function main(argv: readonly string[], io?: CliIO): Promise<number>
       // 由 REPL 置退出码 1 收尾。此时 `agentUnsub` 仍是旧句柄（已调用过），
       // main 的 finally 再调一次是幂等的（boot 的退订按注册身份比对）
       agentUnsub = registerBuiltin('agent-loop', createAgentPlugin({ approve, sessionId: id }))
-      ctx = await boot(config)
+      ctx = await bootWithTimeout(config)
       return ctx
     } catch (err) {
       activeIO.err(`${describeError(err).text}\n`)

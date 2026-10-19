@@ -1,6 +1,6 @@
 # 07-cli 设计
 
-> 状态：**Baseline**（2026-10-18 所有者拍板：**§8 的 Q1–Q15 全部按建议项通过**；并明确"代码不用严格限制行数，超了也没事"——预算仅作登记，不作门禁，见 §7 预算说明。2026-10-18 晚代码评审通过，X1–X5 与 Y1–Y5 全部处置完毕，见 §7）
+> 状态：**Baseline**（2026-10-18 所有者拍板：**§8 的 Q1–Q15 全部按建议项通过**；并明确"代码不用严格限制行数，超了也没事"——预算仅作登记，不作门禁，见 §7 预算说明。2026-10-18 晚代码评审通过，X1–X5 与 Y1–Y9 全部处置完毕——其中 Y7–Y9 为 2026-10-19 外部全模块审查追加，见 §7）
 > 预算：~1.0k 行（架构 §4；本次范围预计 ~1.3k，**超预算不阻断**，见 §7 预算说明）
 > 上游依赖：`00-skeleton.md`（Baseline，重点 §4.1/§4.2 的 boot/shutdown 与 dispose 约定、§5 边界表）、`01-config.md`（Baseline，`loadConfig` / `ConfigError` / `resolvePermission`）、`02-llm.md`（Baseline，`LlmError.kind` 五分类、`createLlmPlugin({fetchImpl})`）、`03-session.md`（Baseline，`SessionError.kind`、`list()`）、`04-prompt.md`（Baseline）、`05-tools.md`（Baseline，**重点 `ApproveHandler` 与审批失败关闭**）、`06-agent.md`（Baseline，**重点 §8 附则"与 07 的职责边界"、§4.7 错误处置、§5 边界表**）、`architecture.md` **0.1.7**（§5.2 取消信号边界与 `AgentControl.sessionId`、§5.5 启动序列、§7 目录布局）
 
@@ -651,6 +651,14 @@ inspectProject(cwd, config, flags):
 | Y4 | **`AgentControl` 新增 `readonly sessionId`，07 改取控制面的 id**（骨架契约改动，架构文档同步至 **0.1.7**；06 设计文档记为 Y3） | 这是 X2 的**彻底解**：06 的控制面闭包本就持有 `session.id`（`plugin.ts:104` 传入），只是 `loop.ts` 的 handle 没带出。补一个字段后，会话 id 从"`list()` 首条"的**推定**变成**确知**，Y1 记下的同毫秒 `createdAt` 边界消失，`/resume` 后的 id 也自证。代价不在代码（净增约 5 行），而在流程——`AgentControl` 属架构 §5.2 骨架契约，改动须改基线并重新 review：同步落点 `contracts.ts` / `agent/loop.ts` / `plugin/containers.test.ts`（手写字面量）/ `architecture.md`（版本 + §12 记录）/ `06-agent.md`（Y3）。对 08/09 亦有用：插件要知道"当前会话"时不必自己猜。**所有者 2026-10-18 拍板"现在就改"**（07 未提交时改最便宜） |
 | Y5 | 补三条此前"绿灯但没测到"的集成链路 | ①**`--resume` 不存在的 id ⇒ 启动期 `BootError` ⇒ 退出码 1**（O4 的启动期分支，此前只测了 resume 成功路径）；②**`/resume` 后断言 `/session` 显示的就是目标 id**（此前只断言"已切换到会话"文案，id 错了也照样绿）；③**夹具补 `audit`，覆盖横幅的项目配置提示行**（O6 的可见部分）。三条均为 Y3 同类的"夹具没走完整装配"问题 |
 | Y6 | **提交前复核的四项清理**：①`/sessions` 去掉自行的 `createdAt.localeCompare` 排序，原样沿用 `list()` 的顺序；②删除 `ReplState.turnRunning` 死字段；③`USAGE` 补上 `-r` 短标；④`restart` 内的 `registerBuiltin` 一并包进 try/catch | ①是 **Y1 的漏网点**：Y1 只在 `initialSessionId` 里去掉了冗余排序，`commands.ts` 的 `/sessions` 同样自排了一次，且其行内注释称"list() 不保证时间序"——与 `store.ts` list 的契约（createdAt 降序 + 同值 id 降序）**直接矛盾**。功能上当前无害（sort 稳定 + ISO 串字典序等于时间序），但"排序契约只在 store 一处"的不变量被破坏，且 `localeCompare` 带 locale 依赖，与 store 的码位比较在含标点/大小写混排时可能分叉。②`turnRunning` 只被写、从未被读（Q8 拍板"空闲也走两段式"后 `interrupt()` 不再需要它），而 `types.ts` 的 JSDoc 仍写着"决定 Ctrl+C 第一次的语义"——**承诺了一个不存在的行为**。③`-r` 在 `parseFlags` 里被接受，却没写进 `--help` 文案（§3.2 的七个 flag 里也没列），属文档漂移。④`restart` 里 `registerBuiltin` 抛错会逃出 `handle.start()`，被 bin 层印成"未捕获的**启动**错误"，可它发生在会话中途；与 ⑤ 同式统一转成"返回 `undefined` ⇒ 退出码 1" |
+
+### 评审修复追加（2026-10-19 外部全模块审查）
+
+| # | 偏离 | 理由 |
+|---|---|---|
+| Y7 | **（P1）行泵单一等待者被并发 ask 覆盖**：默认配置（`permissions: {}` ⇒ 全工具 `ask`、`tools.maxParallel: 4`）下一步内 ≥2 个工具并发审批时，`take()` 无守卫覆盖 `waiter`——前 N-1 个等待者的 resolve 被**静默丢弃**，只能等 60s 审批超时后误判 `permission_denied`（用户无从知晓为何没问它）。附带三处同源缺陷：`chunk.toString('utf8')` 在 chunk 边界切多字节字符（中文输入变 U+FFFD 并永久进 log）；stdin 无 `'error'` 监听（流故障 ⇒ 等待者永久挂、无监听的流抛错还可能带崩进程）；切行逐行 slice 是 O(n²) | `waiter` 改 **FIFO 等待者队列**（`interrupt()` 打断全部 ask、`close()` 唤醒全部）；入队后立即结算杜绝插队；`StringDecoder` 拼回跨 chunk 多字节字符；挂 `'error'` 监听按 EOF 收尾；一次扫描切全部行。探针实证（真实 `createLineReader`）：修复前连输两行 `y` 只有最后一个等待者结算；已补 4 例回归（并发 FIFO / interrupt 全打断 / 多字节切断 / 流错误） |
+| Y8 | **并发审批的提示交错、答案对应关系靠猜**（Y7 的另一半）：行泵队列化后每个 `ask` 都能拿到一行，但 N 个"允许？[y/N]"会**同时打出**，用户无从知道哪行答案对应哪个工具 | `createApproveHandler` 加**串行闸门**（promise 链）：一次只问一个，答完再问下一个。等待者不会挂死（EOF / interrupt / 60s 审批超时都会结算），闸门必然放行，无死锁路径。已补 1 例接真实行泵的回归：并发两次审批，断言第一时刻只有 1 个提示、两行输入与两次审批一一对应 |
+| Y9 | **（P3）`boot()` 无超时兜底**（O5 只包了退出路径）：boot 失败时内核逆序 dispose 已挂载插件（R3），该清理不设超时——单个挂起的 dispose 让 `boot()` 永不返回，**启动期挂死**（连 REPL 都进不去、无任何输出）；09 的 MCP 插件（stdio 子进程）落地后此路径风险升级 | 新增 `bootWithTimeout`（`BOOT_TIMEOUT_MS = 15s`，比 shutdown 的 3s 宽——boot 含本地插件动态 import，冷启动 + 杀软扫描下文件读可能慢到秒级）：超时按启动失败处理（退出码 1 + 诊断），`main` 与 `restart` 两处接入。集成测试的真实 boot 为毫秒级，15s 余量充足（全量门禁复跑全绿） |
 
 ### 评审排除的误报
 

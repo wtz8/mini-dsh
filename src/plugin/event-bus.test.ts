@@ -110,6 +110,35 @@ describe('EventBus · 通知域', () => {
     expect(log.errors[0]![0]).toContain('turn/start')
     expect(escaped).toHaveLength(0)
   })
+
+  // review Y7：非标准 thenable（有 then 无 catch）。原实现裸调 `ret.catch` 会在
+  // try 里同步抛 TypeError——被误记成"监听器抛错"，而真正的 rejection 仍会逃逸。
+  it('非标准 thenable（有 then 无 catch）的 rejection 同样被记录，不逃逸（review Y7）', async () => {
+    const log = stubLogger()
+    const bus = new EventBusImpl(log)
+    const escaped: unknown[] = []
+    const onUnhandled = (err: unknown): void => {
+      escaped.push(err)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    bus.on(
+      'turn/start',
+      (() => ({
+        then(resolve: () => void, reject: (e: unknown) => void): void {
+          setTimeout(() => reject(new Error('thenable boom')), 1)
+          void resolve
+        },
+      })) as unknown as () => void,
+    )
+
+    expect(() => bus.emit('turn/start', { sessionId: 's', turnNo: 1 })).not.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    process.off('unhandledRejection', onUnhandled)
+
+    expect(log.errors).toHaveLength(1)
+    expect(log.errors[0]![0]).toContain('turn/start')
+    expect(escaped).toHaveLength(0)
+  })
 })
 
 describe('EventBus · 瀑布域', () => {

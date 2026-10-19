@@ -1,6 +1,6 @@
 # 02-llm 设计
 
-> 状态：**Baseline**（2026-10-17 代码 review 通过并随模块提交归档；review 期修复 Y1–Y4 见 §7 偏离记录）
+> 状态：**Baseline**（2026-10-17 代码 review 通过并随模块提交归档；review 期修复 Y1–Y6 见 §7 偏离记录，其中 Y6 为 2026-10-19 外部全模块审查追加）
 > 预算：~1.5k 行（架构 §4；本次范围预计 ~0.7k，见 §7 预算说明）
 > 上游依赖：`00-skeleton.md`（Baseline，重点 §5.2/§5.4 的 LLM 契约与 `LlmRegistry` 容器实现）、`01-config.md`（Baseline，重点 §4.2 的 `model.*` 校验与 §5 边界表"apiKeyEnv 由 02 在使用点 fail-fast"）、`architecture.md` 0.1.4（§5.2 adapter 解析约定、§5.4 数据类型）
 
@@ -335,6 +335,12 @@ fixture 目录：`tests/integration/llm-fixtures/`（与 01 的 `config-fixtures
 | # | 问题 | 修复 | 证据 |
 |---|---|---|---|
 | Y5 | **SSE 的 CRLF 在分片边界被误拆成两个换行**（P2）：行尾归一化逐片做，片 1 以 `\r` 结尾（转成 `\n`）、片 2 以 `\n` 开头（原样保留），拼出 `\n\n` → 解析器误判为空行，把一个合法的多行 `data:` 事件拆成两个 frame（违背 RFC 8895 的"多 `data:` 行以 `\n` 合并"） | `SseParser` 增加 `#pendingCR`：把片尾待定的裸 `\r` 留到下一片再判断；`flush()` 时遗留 `\r` 仍按行结束符补 `\n` | 探针 F-06：修复前 `push('data: a\r')` + `push('\ndata: b\r\n\r\n')` 产出两个帧（`a` / `b`）；修复后产出一个帧 `a\nb`（已补 2 例 `sse.test.ts`，含 flush 残帧） |
+
+### 评审修复追加（2026-10-19 外部全模块审查）
+
+| # | 问题 | 修复 | 证据 |
+|---|---|---|---|
+| Y6 | **HTTP 200 但响应体非 SSE 被当空流成功**（P2）：网关忽略 `stream:true` 回整块 JSON、软限流回 HTML 页时，SSE 解析器零产出，`iterate` 只补发一个 `end`——06 落一条**空 assistant + usage 0 并判定回合成功**，协议错误被降级成"正常空结果"，除了一次毫无动静的回合外没有任何诊断线索 | `iterate` 追踪 `sawData`（收到过至少一个 data 帧，含被容忍的 `data: null`）：流 EOF 且未收到 `[DONE]` 且零 data 帧且未 abort ⇒ 抛 `LlmError{kind:'protocol'}`（"no SSE data frames"）；仅 `[DONE]` 的流保持容忍（有 SSE 帧形态，与 Y3 的容忍层语义一致） | 已补 3 例 `adapter.test.ts`（非 SSE JSON 体 / 空响应体 / 仅 `[DONE]` 容忍）；`llm/plugin.test.ts` 的伪 fetch 原注释称"[DONE] 空流"实为零帧空体，同步改为真发 `[DONE]` 帧 |
 
 **本次追加的评审排除项**：
 

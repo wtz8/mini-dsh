@@ -92,9 +92,13 @@ export class EventBusImpl implements EventBus {
       try {
         const ret: unknown = fn(payload)
         // async 监听器（异步函数赋给 void 签名是允许的）的 rejection 不会进同步
-        // try/catch：显式挂 catch，否则逃逸成 unhandledRejection（review Y6）
+        // try/catch：显式挂 catch，否则逃逸成 unhandledRejection（review Y6）。
+        // 经 `Promise.resolve` 适配而非裸调 `ret.catch`（review Y7）：监听器可能返回
+        // **非标准 thenable**（有 then 无 catch），裸调会在 try 里同步抛 TypeError、
+        // 被误记成"监听器抛错"，而真正的 rejection 仍可能逃逸；Promise 适配对任何
+        // thenable 都成立
         if (isThenable(ret)) {
-          void ret.catch((err: unknown) => {
+          void Promise.resolve(ret).catch((err: unknown) => {
             this.#log.error(`event listener of '${type}' threw`, err)
           })
         }

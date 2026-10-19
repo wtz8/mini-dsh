@@ -115,11 +115,14 @@ export function buildSummaryPrompt(transcript: string, keepTurns: number): strin
  * - `user/message` → `用户：…`；`assistant/message` → `助手：…` + 其工具调用骨架；
  * - `tool/result` → `[工具结果 <name> · ok/error] …`（单条截断至 `maxItemChars`）；
  * - `compaction` → 其 `summary` **必须带上**：否则二次压缩会把更早的摘要丢掉；
+ * - **每条入栈前都截断到 `maxItemChars`**（review Y5）：原实现只截工具结果，
+ *   用户/assistant 原文不设限——超大单条输入（粘贴整份文件）会把摘要请求
+ *   本身灌爆，压缩从此永久失败（它要压的正是"太大"，而它发给模型的请求更大）；
  * - `session/header` / `turn/*` 跳过（元信息对摘要无意义）；
  * - 总量超预算时**从最旧开始丢**，并在开头补一行省略说明——近期内容比远古内容重要。
  *
  * @param events 待渲染的事件序列（通常是 `events.slice(0, cut)`）
- * @param options.maxItemChars 单条工具结果上限，默认 `TRANSCRIPT_ITEM_CHARS`
+ * @param options.maxItemChars 单条上限，默认 `TRANSCRIPT_ITEM_CHARS`（自动夹到 ≤ maxChars）
  * @param options.maxChars 总量上限，默认 `TRANSCRIPT_MAX_CHARS`
  * @returns 渲染文本；无任何可渲染内容时为空串
  */
@@ -127,20 +130,22 @@ export function renderTranscript(
   events: readonly SessionEvent[],
   options: { maxItemChars?: number; maxChars?: number } = {},
 ): string {
-  const maxItemChars = options.maxItemChars ?? TRANSCRIPT_ITEM_CHARS
   const maxChars = options.maxChars ?? TRANSCRIPT_MAX_CHARS
+  // 单条上限夹到总量预算内（review Y5）：否则"至少保一行"的守卫会把一条超长行
+  // 原样放行，总量预算形同虚设
+  const maxItemChars = Math.min(options.maxItemChars ?? TRANSCRIPT_ITEM_CHARS, maxChars)
 
   const lines: string[] = []
   for (const event of events) {
     switch (event.type) {
       case 'user/message':
-        lines.push(`用户：${event.content}`)
+        lines.push(`用户：${truncate(event.content, maxItemChars)}`)
         break
 
       case 'assistant/message': {
-        lines.push(`助手：${event.content}`)
+        lines.push(`助手：${truncate(event.content, maxItemChars)}`)
         for (const call of event.toolCalls ?? []) {
-          lines.push(`  [调用 ${call.name}(${truncate(call.arguments, 200)})]`)
+          lines.push(`  [调用 ${call.name}(${truncate(call.arguments, maxItemChars)})]`)
         }
         break
       }
@@ -152,8 +157,8 @@ export function renderTranscript(
       }
 
       case 'compaction':
-        // 更早的摘要必须保留：它是那一段历史唯一的留存
-        lines.push(`会话摘要（更早部分）：${event.summary}`)
+        // 更早的摘要必须保留：它是那一段历史唯一的留存（同样受单条上限约束）
+        lines.push(`会话摘要（更早部分）：${truncate(event.summary, maxItemChars)}`)
         break
 
       default:

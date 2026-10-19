@@ -38,11 +38,11 @@ function formatMeta(meta: unknown[]): string {
  * @returns Logger 实例（四方法：debug/info/warn/error）
  */
 export function createLogger(level: LogLevel): Logger {
-  // Fallback: level comes from config (01 parses it from JSON), an invalid value must not cause all logs to be filtered or all to pass through,
-  // unknown levels are treated as 'info'.
-  // Must check with hasOwn (review Y6): `LEVEL_WEIGHT[level] ?? ...` cannot intercept values that are Object prototype keys——
-  // When level is e.g. 'toString', the indexing hit `Object.prototype.toString` (truthy function),
-  // and in `LEVEL_WEIGHT[lv] < threshold`, number and function are always false, **all log output is silently turned off**.
+  // 兜底：level 来自配置（01 从 JSON 解析），非法值不能导致"日志全被过滤"或"全量放行"，
+  // 未知级别一律按 'info' 处理。
+  // 必须用 hasOwn 判断（review Y6）：`LEVEL_WEIGHT[level] ?? ...` 拦不住取值命中 Object 原型键的情况——
+  // level 若为 'toString'，索引取到的是 `Object.prototype.toString`（一个真值函数），
+  // 而 `LEVEL_WEIGHT[lv] < threshold` 里数字与函数比较恒为 false，结果是**日志被静默全部关掉**。
   const threshold = Object.hasOwn(LEVEL_WEIGHT, level) ? LEVEL_WEIGHT[level] : LEVEL_WEIGHT.info
   /** 单条日志写出：stderr 上的 write 不会阻塞事件循环，失败也不上抛。 */
   const write = (lv: LogLevel, msg: string, meta: unknown[]): void => {

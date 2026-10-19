@@ -289,7 +289,12 @@ export async function main(argv: readonly string[], io?: CliIO): Promise<number>
   // 初值是空操作：注册半途失败时也能安全调用（agentUnsub 可能尚未赋值）
   let agentUnsub: Unsubscribe = () => undefined
   try {
-    builtinUnsubs.push(registerLlmBuiltin(), registerSessionBuiltin(), registerPromptBuiltin(), registerToolsBuiltin())
+    // 逐个 push，不能写成一次 push(四个调用)：JS 先求全部实参再调 push，
+    // 则中途抛错时先前已注册者的句柄一个都没进数组，catch 里清理 0 个，泄漏反而更重。
+    builtinUnsubs.push(registerLlmBuiltin())
+    builtinUnsubs.push(registerSessionBuiltin())
+    builtinUnsubs.push(registerPromptBuiltin())
+    builtinUnsubs.push(registerToolsBuiltin())
     agentUnsub = registerBuiltin('agent-loop', createAgentPlugin({ approve, sessionId: flags.resume }))
   } catch (err) {
     for (const off of builtinUnsubs) off()

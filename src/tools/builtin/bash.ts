@@ -86,7 +86,19 @@ export function resolveShell(mode: 'auto' | 'bash' | 'powershell' = 'auto'): She
   throw new Error('no usable shell found for `bash` tool (tried bash / powershell / sh)')
 }
 
-/** 杀掉进程树：Windows 用 taskkill /T，POSIX 先 SIGTERM 再 SIGKILL。 */
+/**
+ * 杀掉进程树：Windows 用 `taskkill /T /F`，POSIX 先 SIGTERM 再 SIGKILL。
+ *
+ * **已知局限（2026-10-19 Y6 实测，勿再假设它是完整的）**：Windows 上 `taskkill /T`
+ * 未必能杀到孙进程。实测 `bash -c "sleep 20; printf x > f"` 这种**复合命令**——bash
+ * 必须 fork，于是多出一层——`taskkill /T /F` 只杀掉了 bash（报告"成功终止"），
+ * `sleep` 仍活着（前后 tasklist 对比确认）。单条简单命令因 bash 会 exec 掉自己
+ * （子进程就是 sleep、没有孙进程）所以看着正常，这也是该问题长期被掩盖的原因。
+ *
+ * 影响不是"进程残留"这么轻：残留的孙进程握着继承去的 stdout 管道句柄，Node 的
+ * 'close' 事件要等它退出，回合因此被挂满整个命令时长。处置见 `onAbort`——靠切断
+ * stdio 解除阻塞，不靠本函数。
+ */
 function killTree(pid: number | undefined): void {
   if (pid === undefined) return
   if (process.platform === 'win32') {
@@ -168,7 +180,17 @@ export function createBashTool(options: BashToolOptions = {}): ToolDefinition {
         let stdout = ''
         let stderr = ''
         let settled = false
-        const onAbort = (): void => killTree(child.pid)
+        // 取消 = 尽力杀树 + **立刻切断 stdio**，二者缺一回合就被拖住（Y6 实测）：
+        // - 只杀树不 destroy：Windows 上 taskkill /T 打不到 MSYS fork 出的孙进程，
+        //   孙进程握着继承去的管道句柄，'close' 要等它自然退出——实测拖满 60s；
+        // - 只 destroy 不杀树：直接子进程没死，'close' 依然不来（同样实测）。
+        // 孙进程可能残留成孤儿：零运行时依赖下拿不到原生 Job Object API，做不到更强
+        // 的保证；但**回合立即返回**，这正是"取消 ⇒ 不挂住回合"承诺的全部内容。
+        const onAbort = (): void => {
+          killTree(child.pid)
+          child.stdout?.destroy()
+          child.stderr?.destroy()
+        }
 
         const cleanup = (): void => {
           env.signal.removeEventListener('abort', onAbort)

@@ -69,6 +69,10 @@ export function createGrepTool(): ToolDefinition {
 
       const fileMatcher = typeof args['glob'] === 'string' ? matchGlob(args['glob']) : undefined
       const walked = await walkFiles(base, { match: fileMatcher, signal: env.signal })
+      // 与 glob 同一条防线（review Y7）：遍历阶段被取消时 `walkFiles` 静默返回半截
+      // 列表；不拦住的话，下面的循环要么在第一个文件处抛错、要么把「还没搜到」错报成
+      // 「（无匹配）」。取消不是"搜完了没结果"，必须让结果码区分开。
+      if (env.signal.aborted) throw new Error('操作已取消')
 
       const hits: string[] = []
       let truncated = false
@@ -107,7 +111,11 @@ export function createGrepTool(): ToolDefinition {
 
       if (hits.length === 0) return '（无匹配）'
       const notes: string[] = []
-      if (truncated || walked.truncated) notes.push(`（已截断：仅显示前 ${limit} 条命中）`)
+      // 两种"已截断"含义不同（review Y9），分开说：命中数达上限是搜索结果多；
+      // 遍历未完成是目录树没走完（上限命中数约束的是前者）——混在一句里会让
+      // 模型把"没搜完"误读成"就这么多结果"，拿半截列表当全量事实
+      if (truncated) notes.push(`（已截断：命中数已达 limit（${limit}）上限）`)
+      if (walked.truncated) notes.push(`（已截断：目录遍历未完成，以上结果只覆盖部分文件）`)
       return notes.length > 0 ? `${hits.join('\n')}\n\n${notes.join('\n')}` : hits.join('\n')
     },
   }

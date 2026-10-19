@@ -12,8 +12,8 @@ import { createGlobTool } from './glob.js'
 let dir: string
 const tool = createGlobTool()
 
-function env(): ToolEnv {
-  return { callId: 'c1', sessionId: 's1', signal: new AbortController().signal }
+function env(signal = new AbortController().signal): ToolEnv {
+  return { callId: 'c1', sessionId: 's1', signal }
 }
 
 async function seed(): Promise<void> {
@@ -78,5 +78,13 @@ describe('glob 工具', () => {
     const out = await tool.execute({ pattern: '*.ts', path: dir, limit: 1 }, env())
     expect(out).toContain('已截断')
     expect(out).toContain('仅显示前 1 条')
+  })
+
+  // Y7：`walkFiles` 被取消时静默返回半截（truncated=false）。若工具不自己拦，取消会
+  // 变成"一份看起来完整的匹配列表"——下一回合模型据此下结论，而事实只搜了一部分。
+  it('已取消时抛错，而不是返回“（无匹配）”', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(tool.execute({ pattern: '*.ts', path: dir }, env(controller.signal))).rejects.toThrow(/取消/)
   })
 })

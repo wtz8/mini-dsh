@@ -12,8 +12,8 @@ import { createGrepTool } from './grep.js'
 let dir: string
 const tool = createGrepTool()
 
-function env(): ToolEnv {
-  return { callId: 'c1', sessionId: 's1', signal: new AbortController().signal }
+function env(signal = new AbortController().signal): ToolEnv {
+  return { callId: 'c1', sessionId: 's1', signal }
 }
 
 beforeEach(async () => {
@@ -62,5 +62,13 @@ describe('grep 工具', () => {
   it('limit 截断时附说明', async () => {
     const out = await tool.execute({ pattern: 'const', path: dir, limit: 1 }, env())
     expect(out).toContain('已截断')
+  })
+
+  // Y7：取消发生在遍历阶段时，`walkFiles` 返回空/半截列表。此时报「（无匹配）」等于
+  // 告诉模型"确实没有这个字符串"，是错误事实；必须抛错让管道归为 cancelled。
+  it('已取消时抛错，而不是返回“（无匹配）”', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(tool.execute({ pattern: 'needle', path: dir }, env(controller.signal))).rejects.toThrow(/取消/)
   })
 })

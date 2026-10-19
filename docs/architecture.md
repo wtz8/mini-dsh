@@ -1,7 +1,7 @@
 # MiniDSH 骨架设计
 
 > 状态：Reviewed（2026-10-16 所有者拍板 Q1–Q6，可进入 M0 模块设计）
-> 版本：0.1.7（修订记录见 §12）
+> 版本：0.1.9（修订记录见 §12）
 > 参考实现：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) `86a402200d`
 
 ## 1. 项目定位
@@ -70,7 +70,7 @@ MiniDSH 是 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)�
 | 07 | cli | REPL 宿主 + slash 命令 | ~1.0k | 06 |
 | 08 | plugin-memory | MEMORY 文件记忆 + `memory` 工具 | ~0.2k | 05 |
 | 09 | plugin-mcp | MCP stdio 客户端（tools/list + tools/call） | ~0.7k | 05 |
-| | **合计** | | **~11.5k**（目标 ~10k，允许浮动，硬上限 20k，见 process.md §6） | |
+| | **合计** | | **~11.5k**（目标 ~10k；**均为参考值、不设硬限制**，见 process.md §6 与 AGENT.md §4-4） | |
 
 依赖方向单一，无环；实现顺序即编号顺序，一次一个模块。
 
@@ -339,8 +339,8 @@ mini-dsh/
     { "source": "builtin:llm" }, { "source": "builtin:session" },
     { "source": "builtin:prompt" }, { "source": "builtin:tools" },
     { "source": "builtin:agent-loop" },
-    { "source": "./plugins/memory" },
-    { "source": "./plugins/mcp",
+    { "source": "./dist/plugins/memory/index.js" },
+    { "source": "./dist/plugins/mcp/index.js",
       "config": { "servers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } } } }
   ]
 }
@@ -352,7 +352,7 @@ mini-dsh/
 |---|---|---|
 | M0 | 骨架：契约 + 内核 + 组合根 | 冒烟测试通过：挂载 toy 插件（注册 section + 收事件）全链路工作 |
 | M1-M9 | 按 §4 编号逐模块 | 每模块走 process.md 五步循环 |
-| 收尾 | README、总 LOC 复核 | 目标 ~10k，硬上限 ≤ 20k；预算偏差表归档 |
+| 收尾 | README、总 LOC 复核 | 目标 ~10k（**参考值、不设硬上限**）；预算偏差表归档 |
 
 ## 10. 与原版 deepseek-harness 对照
 
@@ -385,6 +385,8 @@ mini-dsh/
 
 | 版本 | 修订内容 |
 |---|---|
+| 0.1.9 | §4 / §9 的 LOC 预算**降级为参考值、撤销 20k 硬上限**（2026-10-19 所有者拍板"行数不设硬限制，可以超过"）：07 曾以"代码不用严格限制行数，超了也没事"为 07 单点豁免（见 `07-cli.md` §7），现升为全项目规则——模块实绩超预算不再需要说明理由、不算门禁失败，总规模目标 ~10k 与原 20k 硬上限一并改为参考值。动机：01–08 的超支全部来自**注释与防御性分支**而非范围膨胀（08 的 341 行超 41% 里逻辑行仅约一半），把登记用的参考值当门禁会逼出"为达标砍注释"的反向激励，与"注释是大厂标准"直接冲突。**本修订不动 §5 骨架契约的任何签名**。同步落点：`AGENT.md` §4-4、`process.md` §6 |
+| 0.1.8 | §8 示例配置订正（08 设计 Q10，所有者 2026-10-19 拍板）：本地插件的 `source` 从目录写法（`./plugins/memory`、`./plugins/mcp`）改为指向**文件**（`./dist/plugins/memory/index.js`、`./dist/plugins/mcp/index.js`）——boot 的 `resolveFactory` 按 cwd 解析后走 ESM `import()`，Node ESM 不支持目录 import（`ERR_UNSUPPORTED_DIR_IMPORT`），目录写法必在 boot 时失败。纯示例订正，不动任何契约签名 |
 | 0.1.7 | §5.2 给 `AgentControl` **新增** `readonly sessionId: string`（**跳过 0.1.6**：该号此前被 PROGRESS 预告给"权限 X4 反转（全局优先）"方案，该方案经所有者否决后未落地、记录已删除，故不再复用此号以免版本史混淆）（07 评审期 Y4，所有者 2026-10-18 拍板）：会话由 06 的 `builtin:agent-loop` 在 `setup()` 内 create/open，`session/header` 事件在 `boot()` 期间即写完，订阅方（07 的渲染层）挂载于 boot 之后**永远收不到它**。缺此出口时"当前会话 id"只能靠 `sessions.list()` 推定最新一条，在两次启动落在同一毫秒 `createdAt` 时会取错（07 X2/Y1 的残留边界）。06 的控制面闭包本就持有该 id，只需带出，属纯新增字段、不改动任何既有签名；同步落点：`src/contracts.ts`、`src/agent/loop.ts`（handle 带出）、`src/plugin/containers.test.ts`（字面量补字段）。对 08/09 同样有用：插件要知道"当前会话"时不必自己猜 |
 | 0.1.0-draft | 初稿：定位、模块分解、骨架契约（§5）、对照表与开放问题 |
 | 0.1.1-draft | 系统提示入口收敛为 `PromptRegistry.render()` 唯一出口；瀑布事件的注册 API 定为 `onWaterfall`；agent 装配语义明确为“容器对象引用恒定、插件只注册不替换”；LOC 统计口径（排除测试、逐模块预算） |

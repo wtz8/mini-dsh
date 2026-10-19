@@ -15,4 +15,18 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    // 09 起出现 .mjs 集成夹具（tests/integration/mcp-fixtures/）：裸 Node ESM 脚本
+    // 不经 tsc，须显式声明 Node 全局，否则 no-undef 对 process/setTimeout 报错
+    files: ['**/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        Buffer: 'readonly',
+      },
+    },
+  },
 )

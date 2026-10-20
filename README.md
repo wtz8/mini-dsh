@@ -1,12 +1,12 @@
 # MiniDSH
 
-![tests](https://img.shields.io/badge/tests-660%20passing-0F6E56)
+![tests](https://img.shields.io/badge/tests-760%20passing-0F6E56)
 ![deps](https://img.shields.io/badge/runtime%20dependencies-0-185FA5)
-![loc](https://img.shields.io/badge/loc-10.3k-534AB7)
-![modules](https://img.shields.io/badge/modules-10-BA7517)
+![loc](https://img.shields.io/badge/loc-14.4k-534AB7)
+![modules](https://img.shields.io/badge/modules-11-BA7517)
 
 > 一个能真正跑起来的 agent 内核：**插件串行挂载、事件瀑布、受保护的工具管道、LLM 适配缝**。
-> 1.03 万行 TypeScript，**运行时依赖为零**，660 例测试全绿。
+> 1.44 万行 TypeScript，**运行时依赖为零**，760 例测试全绿。
 
 `mdsh` 是一个命令行 agent——有会话、有工具、有权限确认、有上下文压缩、有插件。它对照 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（约 46 万行 TS）做**架构级重写**：只保留四条灵魂，砍掉全部产品化工程，换来的是整套设计能被读完、读懂、改得动。
 
@@ -16,10 +16,13 @@
 
 ```mermaid
 flowchart TB
-    CLI["宿主 src/cli · REPL / 流式渲染 / 权限询问"]
+    CLI["CLI 宿主 src/cli · REPL / 流式渲染 / 权限询问"]
+    WEB["Web 宿主 bin/mdsh-web.js · 注册 builtin:web（含审批通道）"]
     BOOT["组合根 boot(config) · 按配置顺序串行挂载"]
     KERNEL["插件内核 src/plugin · EventBus 通知+瀑布 · Ctx 组装"]
-    CLI --> BOOT --> KERNEL
+    CLI --> BOOT
+    WEB --> BOOT
+    BOOT --> KERNEL
 
     subgraph SVCS["Ctx 服务面 —— 插件之间唯一的交互通道"]
         direction LR
@@ -37,7 +40,10 @@ flowchart TB
     P --> PROMPT["prompt/ section 拼装"]
     A --> AGENT["agent/ turn·step loop"]
 
-    TOOLS --> PLUGINS["插件（内核之外，彼此不 import）<br/>memory · mcp"]
+    LLM -.->|"HTTPS · SSE"| DS["DeepSeek API"]
+    TOOLS --> PLUGINS["插件（内核之外，彼此不 import）<br/>memory · mcp · web"]
+    PLUGINS -.->|"stdio"| MCPS["MCP servers"]
+    WEB -.->|"只绑 127.0.0.1 · SSE 推流 / 审批回传"| BROWSER["浏览器（第二宿主形态）"]
 ```
 
 每个模块自己也是插件，经同一协议挂载——**内核不认识任何具体能力**，表里没有对应名字就 fail-fast。
@@ -65,11 +71,11 @@ flowchart LR
 
 | 项 | 值 |
 |---|---|
-| 产品代码 | **10,319 行** TypeScript（不含测试） |
-| 运行时依赖 | **0**（SSE 解析、JSON Schema 校验、MCP 客户端全部手写） |
-| 测试 | **660 例**（单元测试 + 跨模块集成测试） |
-| 模块 | **10 个**（00 骨架 → 09 MCP 插件），一次一个、逐个交付 |
-| 设计文档 | **10 份**逐模块设计 + 1 份架构基线 |
+| 产品代码 | **14,395 行** TypeScript（不含测试） |
+| 运行时依赖 | **0**（SSE 解析、JSON Schema 校验、MCP 客户端、Web 服务全部手写） |
+| 测试 | **760 例**（单元测试 + 跨模块集成测试） |
+| 模块 | **11 个**（00 骨架 → 10 Web UI 插件），一次一个、逐个交付 |
+| 设计文档 | **11 份**逐模块设计 + 1 份架构基线 |
 | 门禁 | typecheck / lint / test 三项全绿 |
 
 ## 它保留了什么，砍掉了什么
@@ -78,7 +84,7 @@ flowchart LR
 
 **砍掉**：Cordis DI 与可逆 effects / 热替换、三域事件收敛为单一总线、会话多版本迁移链与 zstd、compaction 全家收敛为单一 summarize 策略、capability seams（工具直连本地实现）。
 
-记忆与 MCP 都是**插件**而非核心——与原版决策一致：记忆来自外部生态。
+记忆、MCP、Web UI 都是**插件**而非核心——与原版决策一致：记忆来自外部生态，Web UI 走 `dafy-whale-theme` 同款「前端即插件」路线。
 
 ## 快速开始
 
@@ -240,7 +246,7 @@ LLM 能力本身也是插件——内核不认识任何 provider，表里没有 
 | 文档 | 职责 |
 |---|---|
 | `docs/architecture.md` | 骨架基线：契约签名、模块依赖顺序、回合数据流（**改动需重新 review**） |
-| `docs/design/00-skeleton.md` … `09-plugin-mcp.md` | 逐模块设计，各含决策记录（D1…）与偏离记录（X / Y 两系） |
+| `docs/design/00-skeleton.md` … `10-web-ui.md` | 逐模块设计，各含决策记录（D1…）与偏离记录（X / Y 两系） |
 | `docs/PROGRESS.md` | 跨会话交接的唯一事实源：实绩 LOC、遗留与阻塞、下一步动作 |
 | `docs/process.md` | 开发流程规范、模板与 DoD |
 
@@ -249,7 +255,7 @@ LLM 能力本身也是插件——内核不认识任何 provider，表里没有 
 ```bash
 pnpm typecheck     # tsc --noEmit
 pnpm lint          # eslint
-pnpm test          # vitest（660 例）
+pnpm test          # vitest（760 例）
 pnpm build         # tsc → dist/
 ```
 

@@ -2,6 +2,7 @@ import { StringDecoder } from 'node:string_decoder'
 import type { Readable } from 'node:stream'
 
 import type { CliIO, LineReader } from './types.js'
+import { detectRich } from './theme.js'
 
 /**
  * 宿主 IO：stdin 行泵与进程 IO 面（D2）。
@@ -155,6 +156,9 @@ export function createLineReader(input: Readable, out?: (text: string) => void):
  *
  * `isTTY` 取 `process.stdin.isTTY`——它决定两件事（§4.6 / Q4）：非交互时
  * 不打提示符，且审批一律失败关闭（无 TTY 就无从取得用户同意）。
+ *
+ * `rich` 取 **`process.stdout.isTTY`** 并经 `detectRich` 过滤（§4.3.1 / Q16）：
+ * 着色的前提是"输出面能解释转义码"，与"能否向用户提问"无关，故不复用 `isTTY`。
  */
 export function createProcessIO(): CliIO {
   const out = (text: string): void => {
@@ -167,5 +171,6 @@ export function createProcessIO(): CliIO {
     },
     lines: createLineReader(process.stdin, out),
     isTTY: Boolean(process.stdin.isTTY),
+    rich: detectRich({ stdoutIsTTY: Boolean(process.stdout.isTTY) }),
   }
 }

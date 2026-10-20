@@ -3,6 +3,7 @@ import type { Unsubscribe } from '../contracts.js'
 import { findCommand } from './commands.js'
 import { describeError } from './diagnose.js'
 import { attachRender, formatBanner, formatTurnSummary } from './render.js'
+import { createTheme } from './theme.js'
 import type { CliHandle, CliOptions, CommandOutcome, ReplState } from './types.js'
 import { DOUBLE_INTERRUPT_MS } from './types.js'
 
@@ -36,8 +37,11 @@ export function createCli(options: CliOptions): CliHandle {
     lastInterruptAt: 0,
   }
 
+  /** 呈现主题（§4.3.1）：由 `io.rich` 决定，REPL 生命周期内只造一次并往下传。 */
+  const theme = createTheme(io.rich === true)
+
   /** 当前内核的渲染订阅（`/resume` 重启后会整体换掉）。 */
-  let unsubs: Unsubscribe[] = attachRender(state.ctx, io, state)
+  let unsubs: Unsubscribe[] = attachRender(state.ctx, io, state, theme)
   /** 退出码：正常 0；`/resume` 重启失败时为 1。 */
   let exitCode = 0
 
@@ -76,13 +80,13 @@ export function createCli(options: CliOptions): CliHandle {
     state.ctx = next
     // 重启的目标会话就是刚切换过去的那个（header 事件同样收不到，见 X1）
     state.sessionId = id
-    unsubs = attachRender(state.ctx, io, state)
+    unsubs = attachRender(state.ctx, io, state, theme)
     io.out(`已切换到会话 ${id}\n`)
   }
 
   return {
     async start(): Promise<number> {
-      io.out(formatBanner(config, state.sessionId, options.audit))
+      io.out(formatBanner(config, state.sessionId, options.audit, theme))
 
       while (!state.exiting) {
         const line = await io.lines.next()
@@ -100,7 +104,7 @@ export function createCli(options: CliOptions): CliHandle {
 
         try {
           const summary = await state.ctx.agent.resolve().run({ text })
-          io.out(formatTurnSummary(summary))
+          io.out(formatTurnSummary(summary, theme))
         } catch (err) {
           // D4：回合内错误只打印诊断、不终止 REPL —— 会话还在，用户可重试
           io.err(`${describeError(err).text}\n`)

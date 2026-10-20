@@ -1,6 +1,7 @@
 import type { ApproveHandler } from '../index.js'
 
 import { oneLine } from './render.js'
+import { createTheme } from './theme.js'
 import type { CliIO } from './types.js'
 import { ARGS_PREVIEW_CHARS } from './types.js'
 
@@ -41,6 +42,8 @@ function previewArgs(args: Record<string, unknown>): string {
  * @returns 可直接交给 `createAgentPlugin({ approve })` 的处理器
  */
 export function createApproveHandler(io: CliIO): ApproveHandler {
+  /** 呈现主题（§4.3.1）；`plain` 下为恒等变换，故以下文案与改造前逐字节一致。 */
+  const t = createTheme(io.rich === true)
   /** 串行闸门：上一次审批结算后才放行下一次提问。 */
   let gate: Promise<unknown> = Promise.resolve()
   return async (invocation): Promise<boolean> => {
@@ -51,12 +54,12 @@ export function createApproveHandler(io: CliIO): ApproveHandler {
         return false
       }
 
-      io.out(`\n⚠ 工具 ${invocation.name} 需要授权（turn ${invocation.turnNo} / step ${invocation.stepNo}）\n`)
-      io.out(`  ${oneLine(previewArgs(invocation.args), ARGS_PREVIEW_CHARS)}\n`)
+      io.out(`\n${t.warn('⚠')} ${t.warn(`工具 ${invocation.name} 需要授权`)}${t.dim(`（turn ${invocation.turnNo} / step ${invocation.stepNo}）`)}\n`)
+      io.out(`  ${t.dim(oneLine(previewArgs(invocation.args), ARGS_PREVIEW_CHARS))}\n`)
 
       let answer: string | null
       try {
-        answer = await io.lines.ask('允许？[y/N] ')
+        answer = await io.lines.ask(`${t.accent('允许？[y/N]')} `)
       } catch {
         // ask 抛错（流已关闭等）同样视为拒绝，绝不把异常漏给 05
         answer = null

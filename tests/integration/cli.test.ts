@@ -112,7 +112,7 @@ interface FakeIO extends CliIO {
   stderr(): string
 }
 
-function fakeIO(inputs: Script): FakeIO {
+function fakeIO(inputs: Script, rich = false): FakeIO {
   const outLines: string[] = []
   const errLines: string[] = []
   let index = 0
@@ -141,6 +141,9 @@ function fakeIO(inputs: Script): FakeIO {
     err: (text) => errLines.push(text),
     lines,
     isTTY: true,
+    // X6：伪终端默认**不声明** rich ⇒ plain。这是"管道/重定向"的模拟，
+    // 也是大多数既有链路所处的模式（它们断言的是纯文本形态）
+    rich,
     outLines,
     errLines,
     stdout: () => outLines.join(''),
@@ -202,8 +205,10 @@ async function bootCli(options: {
   resume?: string
   /** 项目层体检结果（O6）；传入则横幅会多出提示行 */
   audit?: ProjectAudit
+  /** 富化渲染开关（X6 / §4.3.1）：置 true 模拟真实终端，省略则模拟管道 */
+  rich?: boolean
 }): Promise<Harness> {
-  const io = fakeIO(options.inputs)
+  const io = fakeIO(options.inputs, options.rich === true)
   // O1：这里刻意喂 plugins 为空的配置，让 withDefaultPlugins 去补——补不出来
   // 后面所有链路都跑不起来
   const base = makeConfig(options.patch)
@@ -520,4 +525,38 @@ describe('07-cli 集成', () => {
     },
     15000,
   )
+
+  it('链路 10 · 管道模式零 ANSI（X6 / §4.3.1）：plain 主题必须是恒等变换', async () => {
+    const target = path.join(workDir, 'plain.txt')
+    const call = `data: ${JSON.stringify({
+      choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'write', arguments: JSON.stringify({ path: target, content: 'hi' }) } }] } }],
+    })}\n\n`
+    const fake = queuedFetch([[call, doneChunk()], [textChunk('写好了'), doneChunk()]])
+
+    // 伪 IO 未声明 rich ⇒ 模拟管道/重定向
+    const h = await bootCli({ fake, inputs: ['写个文件', 'y', null] })
+    expect(await h.handle.start()).toBe(0)
+
+    const all = `${h.io.stdout()}${h.io.stderr()}`
+    expect(all).toContain('↳ ✓') // plain 的既有形态照旧（本条变红即为回归）
+    expect(all).toContain('turn 1')
+    expect(all).not.toContain('\x1b') // 一个转义码都不许有
+  })
+
+  it('链路 10b · 富化模式端到端：stdout 含 ANSI，关键子串与 plain 一致', async () => {
+    const target = path.join(workDir, 'rich.txt')
+    const call = `data: ${JSON.stringify({
+      choices: [{ delta: { tool_calls: [{ index: 0, id: 'c2', function: { name: 'write', arguments: JSON.stringify({ path: target, content: 'hi' }) } }] } }],
+    })}\n\n`
+    const fake = queuedFetch([[call, doneChunk()], [textChunk('写好了'), doneChunk()]])
+
+    const h = await bootCli({ fake, inputs: ['写个文件', 'y', null], rich: true })
+    expect(await h.handle.start()).toBe(0)
+
+    const stdout = h.io.stdout()
+    expect(stdout).toContain('\x1b[') // 真的富化了
+    expect(stdout).toContain('写好了') // 流式文本未被样式吞掉
+    expect(stdout).toContain('turn 1') // 摘要子串与 plain 一致
+    expect(stdout).toContain('✓')
+  })
 })

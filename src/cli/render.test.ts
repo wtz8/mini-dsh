@@ -2,6 +2,7 @@ import type { Config, Ctx, NotificationMap, ToolResult, Unsubscribe } from '../c
 import { describe, expect, it } from 'vitest'
 
 import { attachRender, formatBanner, formatTurnSummary, oneLine } from './render.js'
+import { createTheme } from './theme.js'
 import type { CliIO, ReplState } from './types.js'
 
 /**
@@ -207,5 +208,114 @@ describe('oneLine', () => {
   it('换行折叠为空格，超出截断并加省略号', () => {
     expect(oneLine('a\nb', 10)).toBe('a b')
     expect(oneLine('a'.repeat(20), 5)).toBe(`${'a'.repeat(5)}…`)
+  })
+})
+
+/**
+ * 富化分支（§4.3.1 / X6）。
+ *
+ * 守两条：**富化模式真的富化了**（有 ANSI、有耗时、有分隔线），以及
+ * **`plain` 模式零 ANSI**（恒等主题是不变量，由集成链路 10 在整条 REPL 上再守一次）。
+ */
+describe('富化渲染', () => {
+  const rich = createTheme(true)
+
+  it('工具两行富化：● name … → └ ✓ 结果 · 耗时', () => {
+    const { ctx, emit } = fakeCtx()
+    const { io, out } = fakeIO()
+    attachRender(ctx, io, state(ctx), rich)
+
+    emit('tool/start', { sessionId: 's', callId: 'call_0', name: 'read' })
+    emit('session/append', { sessionId: 's', event: { type: 'tool/result', toolCallId: 'call_0', result: result(true, 'ok') } })
+
+    const text = out.join('')
+    expect(text).toContain('\x1b[')
+    expect(text).toContain('●')
+    expect(text).toContain('read')
+    expect(text).toContain('✓')
+    expect(text).toContain('ok')
+    // 耗时：快工具走毫秒档（0ms / 1ms 都算通过，故用正则）
+    expect(text).toMatch(/· \d+(\.\d+)?(ms|s)/)
+  })
+
+  it('富化失败行：✗ + 错误码 + 耗时', () => {
+    const { ctx, emit } = fakeCtx()
+    const { io, out } = fakeIO()
+    attachRender(ctx, io, state(ctx), rich)
+
+    emit('tool/start', { sessionId: 's', callId: 'c', name: 'bash' })
+    emit('session/append', {
+      sessionId: 's',
+      event: { type: 'tool/result', toolCallId: 'c', result: result(false, 'denied', 'permission_denied') },
+    })
+
+    const text = out.join('')
+    expect(text).toContain('✗')
+    expect(text).toContain('permission_denied')
+    expect(text).toMatch(/· \d+(\.\d+)?(ms|s)/)
+  })
+
+  it('耗时账本取走即失效：同一 callId 的第二次 result 不再带耗时', () => {
+    const { ctx, emit } = fakeCtx()
+    const { io, out } = fakeIO()
+    attachRender(ctx, io, state(ctx), rich)
+    const append = (): void =>
+      emit('session/append', { sessionId: 's', event: { type: 'tool/result', toolCallId: 'c', result: result(true, 'ok') } })
+
+    emit('tool/start', { sessionId: 's', callId: 'c', name: 'read' })
+    append()
+    out.length = 0
+    append() // 无对应的 start ⇒ 无耗时片段
+
+    expect(out.join('')).not.toMatch(/· \d+(\.\d+)?(ms|s)/)
+  })
+
+  it('富化横幅：带 ANSI，且关键子串与 plain 完全一致', () => {
+    const cfg = config()
+    cfg.model.baseUrl = 'http://example.com/v1'
+    const text = formatBanner(cfg, 's1', { localPlugins: [], overridesEndpoint: true, insecureEndpoint: true, file: '/w/minidsh.json' }, rich)
+
+    expect(text).toContain('\x1b[')
+    for (const needle of ['mdsh 0.1.0', 'deepseek/deepseek-chat', 'session s1', 'http://example.com/v1', 'DEEPSEEK_API_KEY', '改写了接入点', '明文 http']) {
+      expect(text, `富化横幅应仍含「${needle}」`).toContain(needle)
+    }
+  })
+
+  it('富化摘要：前置分隔线，且子串与 plain 一致', () => {
+    const summary: Parameters<typeof formatTurnSummary>[0] = {
+      turnNo: 1,
+      stepCount: 2,
+      totalUsage: { inputTokens: 30, outputTokens: 13 },
+      interrupted: false,
+    }
+    const plain = formatTurnSummary(summary)
+    const text = formatTurnSummary(summary, rich)
+
+    expect(text).toContain('\x1b[')
+    for (const needle of ['turn 1', 'steps 2', '30/13']) {
+      expect(text).toContain(needle)
+      expect(plain).toContain(needle)
+    }
+    expect(text).toContain('─'.repeat(60))
+  })
+
+  it('plain 侧零 ANSI：渲染全路径（横幅 / 工具两行 / 摘要）', () => {
+    const { ctx, emit } = fakeCtx()
+    const { io, out } = fakeIO() // 伪 IO 未声明 rich ⇒ plain
+    attachRender(ctx, io, state(ctx))
+
+    emit('stream/chunk', { sessionId: 's', delta: { type: 'text', delta: '你好' } })
+    emit('tool/start', { sessionId: 's', callId: 'c', name: 'read' })
+    emit('session/append', { sessionId: 's', event: { type: 'tool/result', toolCallId: 'c', result: result(true, 'ok') } })
+    emit('tool/start', { sessionId: 's', callId: 'c2', name: 'bash' })
+    emit('session/append', { sessionId: 's', event: { type: 'tool/result', toolCallId: 'c2', result: result(false, 'boom') } })
+
+    const all =
+      out.join('') +
+      formatBanner(config(), 's1', { localPlugins: [], overridesEndpoint: true, insecureEndpoint: true, file: '/w/minidsh.json' }) +
+      formatTurnSummary({ turnNo: 1, stepCount: 2, totalUsage: { inputTokens: 1, outputTokens: 1 }, interrupted: false }) +
+      formatTurnSummary({ turnNo: 1, stepCount: 2, totalUsage: { inputTokens: 1, outputTokens: 1 }, interrupted: true })
+
+    expect(all).not.toContain('\x1b')
   })
 })

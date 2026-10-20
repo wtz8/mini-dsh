@@ -356,8 +356,30 @@ start():
 回合结束（REPL 侧）：`\n— turn N · steps S · tokens in/out —`，`interrupted` 时前置一行 `（已取消）`。
 
 - **工具结果用 `session/append` 而非 `tool/end` 渲染**：05 的时序是 `tool/start → execute → tool/end → post-execute → append`（pipeline §4.1 步骤 ⑧⑪），`tool/end` 时结果还没入 log；而 `tool/result` 的载荷带 `ok` / `error.code`，正好是渲染要的结论。
-- 无 ANSI、无进度条：输出到管道时（非 TTY）同样可读（§1 非目标）。
+- 无 ANSI、无进度条：输出到管道时（非 TTY）同样可读（§1 非目标）。**此条已由 §4.3.1 修正为"按输出目标分支"**——原措辞把一条正确的约束（管道可读）泛化到了 TTY 场景，代价是交互观感停留在调试输出。
 - 监听器抛错由总线捕获（架构 §5.3），渲染代码仍保持"不抛"的自律：格式化函数对任意 `content` 都安全（单行化 = 换行替换空格 + 截断）。
+
+#### 4.3.1 呈现主题与富化渲染（2026-10-19 追加，`theme.ts`）
+
+§4.3 的"无 ANSI"是**对管道的约束**，不是对终端的约束。追加一层 `Theme` 抽象，让两者同时成立：
+
+| 模式 | 触发条件 | 输出 |
+|---|---|---|
+| **plain**（默认） | 未声明 `rich`，或 `detectRich()` 为 false | 与 §4.3 **逐字节一致**（恒等主题） |
+| **rich** | `CliIO.rich === true`（生产由 `process.stdout.isTTY` 决定） | 分层横幅、工具区块带耗时、角色着色 |
+
+富化后的三处形态（`plain` 侧不变）：
+
+- **横幅**：主行 `mdsh <ver> · provider/model · session <id>`（品牌加粗 + 模型强调 + 会话弱化），下接弱化分隔线，次要信息（接入点 / 凭据来源）与用法提示降级为弱化或警告色，整体缩进两格成卡片状；
+- **工具两行**：`● <name> …` → `└ ✓ <单行结果> · <耗时>`（失败为 `✗ <code>`，走红）。耗时来自 `tool/start` 记的时间戳与 `session/append(tool/result)` 时刻之差（按 `callId` 存在闭包 Map 里，退订时清空）；
+- **回合摘要**：前置一条分隔线，摘要行弱化。文案与 `plain` 保持**相同子串**（`turn N` / `steps S` / `tokens in/out`），任何 `toContain` 断言在两种模式下都成立。
+
+**为什么是显式 `Theme` 参数而不是读 `io.isTTY`**（两条例由，缺一不可）：
+
+1. `CliIO.isTTY` 是 `process.stdin.isTTY`，语义是"能否向用户**提问**"（§4.6 据此决定非交互时审批一律拒绝）；能否着色该看 **stdout**。`mdsh > out.txt` 下 stdin 是 TTY、stdout 是文件——复用它会把转义码写进文件，正好破坏上面那条自律。
+2. 现有伪 IO 几乎都是 `isTTY: true`（`render.test.ts:50` / `repl.test.ts:118` / 集成夹具 / `main.test.ts:27`），若渲染内部按它分支，`render.test.ts` 的 8 处精确断言（含 103 行的**相等**断言、124–125 行的**长度**断言）会全部走富化路径而变红。做成显式参数后"未声明即 plain"，**现有断言一行不用改**。
+
+**`plain` 主题的强约束**：所有函数是**恒等变换**，不是"去掉颜色"。目的是让富化改造对管道输出零影响，此不变量由集成测试链路 9 守门（§6.2）。
 
 ### 4.4 slash 命令（`commands.ts`）
 
@@ -597,7 +619,7 @@ inspectProject(cwd, config, flags):
 
 与 `tests/integration/agent.test.ts` 同式：真实 `boot`、真实 JSONL（tmp 目录）、真实工具与 prompt，**只在网络出口与 stdin/stdout 注入伪实现**。通过 `createCli({ ctx, config, io })` 或 `main(argv, io)` 驱动，断言收集到的全部 stdout 文本。
 
-实现结果：**九条链路**（X5：原计划的第 1、2 条合并；评审期新增 6b / 6c / 7b 三条——见 Y3 / Y5）。
+实现结果：**十条链路**（X5：原计划的第 1、2 条合并；评审期新增 6b / 6c / 7b 三条——见 Y3 / Y5；X6 追加第 10 条守门）。
 
 1. **默认 plugins 生效**（O1）：不配 `plugins`（用 `createDefaultConfig()`）⇒ 启动后 `ctx.prompt.render()` 含工具段、`ctx.agent.resolve()` 可用、一个纯文本回合跑完（`stepCount:1`）。
 2. **一问一答链路**：伪 stdin 投一行 ⇒ stdout 含流式回复文本与 `— turn 1 · steps 1` 摘要行。
@@ -608,6 +630,7 @@ inspectProject(cwd, config, flags):
 7. **`--resume` 与 `/resume`**：启动带 `--resume <id>`（先用一次 boot 造会话）⇒ 第二次进程 `turnNo` 从 2 起；REPL 内 `/resume <另一 id>` ⇒ 内核重启后会话切换（断言新 `session/header` 的 id）。
 8. **项目配置信任确认（F-02）**：tmp 目录里放一份含 `./plugin.js` 的 `minidsh.json` ⇒ 启动出现确认提示；拒绝 ⇒ 退出码 1；带 `--trust-project` ⇒ 正常启动。
 9. **dispose 超时兜底**：注入一个 dispose 永不返回的插件 ⇒ 退出流程在 ~3s 后结束（断言耗时 < 5s 且退出码仍产出）。
+10. **管道模式零 ANSI**（X6 追加，`plain` 不变量的守门）：伪 IO 不声明 `rich` ⇒ 整个 REPL 生命周期收集到的 stdout/stderr **不含 `\x1b`**。此链路一旦变红，说明有人把着色写进了非富化路径。
 
 ## 7. 验收标准（DoD）
 
@@ -639,6 +662,7 @@ inspectProject(cwd, config, flags):
 | X3 | **两段式的第二下用 `lines.close()` 而非 `lines.interrupt()`** | 空闲时 REPL 正 `await lines.next()`。只置 `exiting` 的话，循环要等下一次 stdin 有动静才检查得到——用户按了 Ctrl+C 还得敲一下回车才退出。close 唤醒等待者（EOF 语义），循环随即结束。`interrupt()` 仍只作用于 `ask`（防止把 REPL 的等待误判成 EOF） |
 | X4 | **注册 builtin 整段包 try/catch，失败时退订已注册者** | builtin 表是进程级全局、同名重复注册会抛错。半途失败（上一次启动没退干净）若不清理，故障会转移到下一次启动。探针 P1 实证：占了位的手柄仍能正常退订（说明没误删别人的注册） |
 | X5 | 集成测试合并为**八条链路**（原 §6.2 的第 1、2 条——"默认 plugins 生效"与"一问一答"——合并为一条） | 两者共享同一套装配，拆开要重复一次 boot；O1 的断言（工具段/agent 可用）与流式渲染断言放在同一回合里更连贯 |
+| X6 | **（2026-10-19 交付后追加）新增 `theme.ts` 呈现主题层，渲染按输出目标分支富化** | §4.3 的"无 ANSI"约束是对的（管道要可读），但被无差别应用到了 TTY——交互观感因此停留在调试输出。追加一层 `Theme`（见 §4.3.1）：显式参数、`plain` 为恒等变换、未声明即 plain，故**现有 8 处渲染断言一行未改**。属交付后追加的实现，性质为实现期偏离，故归入 X 系而非另起编号。决策见 §8 的 Q16–Q18 |
 
 ### 偏离记录（评审期，编号 Y）
 
@@ -711,6 +735,16 @@ X1–X5 全部**已改正或本就不构成缺陷**，无一"将错就错"：
 | Q13 | 回合结束是否打印摘要 | **打印**：`— turn N · steps S · tokens in/out —`；`interrupted` 时加"（已取消）" |
 | Q14 | 是否新增 `Config` 字段 / 改契约 | **不改**。07 的全部策略落在自身常量（`DOUBLE_INTERRUPT_MS` / `SHUTDOWN_TIMEOUT_MS` / `DEFAULT_PLUGINS`） |
 | Q15 | 预算 | **不设门禁**：所有者明确"代码不用严格限制行数，超了也没事"。预估 ~1.29k 仍登记在 §7 预算说明，但不作为验收条件 |
+
+#### 追加决策（2026-10-19，渲染观感改造）
+
+| # | 问题 | 决议 |
+|---|---|---|
+| Q16 | 富化的判定读哪个 TTY | **新增 `CliIO.rich`，取 `process.stdout.isTTY`**，不复用 `isTTY`（= stdin）。两者的语义本就不同：stdin 的 TTY 决定"能否提问"，stdout 的 TTY 决定"能否着色"。`mdsh > out.txt` 下二者分叉，复用会把转义码写进文件 |
+| Q17 | 富化如何不破坏现有断言 | **显式 `Theme` 参数 + `plain` 为恒等主题**。伪 IO 未声明 `rich` 即走 plain，故 `render.test.ts` 的相等/长度断言一行不用改；富化分支另写单测 |
+| Q18 | 是否引 chalk 之类的依赖 | **不引**。ANSI 就是 `\x1b[…m` 字符串，手写十几行足够；`package.json` 的 `dependencies` 保持为空（与 Q14 同旨）。另尊重社区约定：`NO_COLOR` 非空、`TERM=dumb`、旧版 conhost（win32 且无 `WT_SESSION` / `TERM`）一律不富化 |
+| Q19 | 是否加 `--no-color` flag | **不加**。环境变量已覆盖主要诉求，而加 flag 要动 `parseFlags` / `USAGE` / flags 形态测试，与本项"渲染是可替换末端、内核零改动"的叙事相悖。需要时再加 |
+| Q20 | 分隔线是否读终端宽度 | **固定 60 字符**。为一条分隔线给 `CliIO` 加 `columns` 字段不值当（D2 的 IO 面是刻意收窄的）；60 在 80 与 120 列下都不折行 |
 
 ### 附：与 08 / 09 的职责边界
 

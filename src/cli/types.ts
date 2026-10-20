@@ -126,7 +126,7 @@ export interface LineReader {
  * 有了它，REPL 循环 / 审批 / 两段式中断 / 退出码这些行为才可能被测试驱动。
  */
 export interface CliIO {
-  /** 渲染与提示（stdout）；不做 ANSI 着色（§1 非目标） */
+  /** 渲染与提示（stdout）；是否着色由 §4.3.1 的 `Theme` 决定，非此处 */
   out(text: string): void
   /** 诊断与错误（stderr） */
   err(text: string): void
@@ -137,6 +137,18 @@ export interface CliIO {
    * 因为无 TTY 就无从取得用户同意。
    */
   isTTY: boolean
+  /**
+   * stdout 是否可以承载 ANSI 转义（§4.3.1 / Q16）。
+   *
+   * **与 `isTTY` 不是一回事**：后者是 `process.stdin.isTTY`，语义是"能否向用户
+   * **提问**"；本字段的语义是"能否**着色**"，生产取 `process.stdout.isTTY`。
+   * `mdsh > out.txt` 下二者分叉——stdin 是 TTY、stdout 是文件，此时绝不能着色，
+   * 否则转义码会写进文件、破坏"输出能被管道消费"的自律。
+   *
+   * **可选**：未声明即按 `false`（plain）处理。这样测试里的伪 IO 不必逐个补字段，
+   * 且"不声明就不富化"是最保守的默认（Q17）。
+   */
+  rich?: boolean
 }
 
 /** REPL 的可变状态（§3.4）。 */

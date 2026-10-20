@@ -1,7 +1,7 @@
 # MiniDSH 骨架设计
 
 > 状态：Reviewed（2026-10-16 所有者拍板 Q1–Q6，可进入 M0 模块设计）
-> 版本：0.1.9（修订记录见 §12）
+> 版本：0.1.10（修订记录见 §12）
 > 参考实现：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) `86a402200d`
 
 ## 1. 项目定位
@@ -15,7 +15,9 @@ MiniDSH 是 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)�
 3. **Guarded tool pipeline** —— 工具执行必须过 `schema 校验 → pre-execute（可否决）→ execute → post-execute` 管道。
 4. **LLM adapter seam** —— provider 是可替换接口，DeepSeek 只是默认实现。
 
-**明确不做**（与原版对照详见 §10）：Web UI、Electron、SDK/ACP 服务、HMR 与插件热卸载、Cordis 可逆 effects、session 多版本迁移、subagent/teams、MCP resources/prompts/sampling、sandbox、LSP、browser-use、telemetry、i18n、npm 插件分发。
+**明确不做**（与原版对照详见 §10）：Electron、SDK/ACP 服务、HMR 与插件热卸载、Cordis 可逆 effects、session 多版本迁移、subagent/teams、MCP resources/prompts/sampling、sandbox、LSP、browser-use、telemetry、i18n、npm 插件分发。
+
+> **例外登记（0.1.10，2026-10-20 所有者拍板）**：`plugins/web/` 作为 **10-web-ui 模块**交付一个本地 Web UI——它是**演示宿主 + 灵魂 #1 的验证载体**，不是产品化前端：只绑回环、零运行时依赖、`src/` 一行不改、不做 mock。该条目原列在"明确不做"清单中（原指原版的产品化前端工程），此处登记为项目级偏离，详情见 `docs/design/10-web-ui.md` §1.2。
 
 ## 2. 技术选型
 
@@ -385,6 +387,7 @@ mini-dsh/
 
 | 版本 | 修订内容 |
 |---|---|
+| 0.1.10 | §1"明确不做"清单登记**项目级例外**：`plugins/web/`（10-web-ui）交付本地 Web UI（蓝色大肥鱼主题）。定位是**演示宿主 + 灵魂 #1（everything is a plugin）的验证载体**——第二个宿主在不改 `src/` 一行的情况下驱动整个 agent。硬约束：只绑回环（非回环拒绝启动）、零运行时依赖、不做 mock。审批通道经 `createWebPlugin()` 的工厂选项注入 agent-loop（绕过 `plugins[].config` 的 deepFreeze，属宿主档优先级）。**不动 §5 骨架契约的任何签名**；`src/` 全量零改动（`git status` 可核验）。落点：`plugins/web/` 九文件 + `bin/mdsh-web.js` |
 | 0.1.9 | §4 / §9 的 LOC 预算**降级为参考值、撤销 20k 硬上限**（2026-10-19 所有者拍板"行数不设硬限制，可以超过"）：07 曾以"代码不用严格限制行数，超了也没事"为 07 单点豁免（见 `07-cli.md` §7），现升为全项目规则——模块实绩超预算不再需要说明理由、不算门禁失败，总规模目标 ~10k 与原 20k 硬上限一并改为参考值。动机：01–08 的超支全部来自**注释与防御性分支**而非范围膨胀（08 的 341 行超 41% 里逻辑行仅约一半），把登记用的参考值当门禁会逼出"为达标砍注释"的反向激励，与"注释是大厂标准"直接冲突。**本修订不动 §5 骨架契约的任何签名**。同步落点：`AGENT.md` §4-4、`process.md` §6 |
 | 0.1.8 | §8 示例配置订正（08 设计 Q10，所有者 2026-10-19 拍板）：本地插件的 `source` 从目录写法（`./plugins/memory`、`./plugins/mcp`）改为指向**文件**（`./dist/plugins/memory/index.js`、`./dist/plugins/mcp/index.js`）——boot 的 `resolveFactory` 按 cwd 解析后走 ESM `import()`，Node ESM 不支持目录 import（`ERR_UNSUPPORTED_DIR_IMPORT`），目录写法必在 boot 时失败。纯示例订正，不动任何契约签名 |
 | 0.1.7 | §5.2 给 `AgentControl` **新增** `readonly sessionId: string`（**跳过 0.1.6**：该号此前被 PROGRESS 预告给"权限 X4 反转（全局优先）"方案，该方案经所有者否决后未落地、记录已删除，故不再复用此号以免版本史混淆）（07 评审期 Y4，所有者 2026-10-18 拍板）：会话由 06 的 `builtin:agent-loop` 在 `setup()` 内 create/open，`session/header` 事件在 `boot()` 期间即写完，订阅方（07 的渲染层）挂载于 boot 之后**永远收不到它**。缺此出口时"当前会话 id"只能靠 `sessions.list()` 推定最新一条，在两次启动落在同一毫秒 `createdAt` 时会取错（07 X2/Y1 的残留边界）。06 的控制面闭包本就持有该 id，只需带出，属纯新增字段、不改动任何既有签名；同步落点：`src/contracts.ts`、`src/agent/loop.ts`（handle 带出）、`src/plugin/containers.test.ts`（字面量补字段）。对 08/09 同样有用：插件要知道"当前会话"时不必自己猜 |

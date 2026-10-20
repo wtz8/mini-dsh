@@ -1,12 +1,84 @@
 # MiniDSH
 
-> `deepseek-harness` 的**架构级迷你复刻**：插件内核 + agent 骨架，**零运行时依赖**。
+![tests](https://img.shields.io/badge/tests-660%20passing-0F6E56)
+![deps](https://img.shields.io/badge/runtime%20dependencies-0-185FA5)
+![loc](https://img.shields.io/badge/loc-10.3k-534AB7)
+![modules](https://img.shields.io/badge/modules-10-BA7517)
 
-`mdsh` 是一个能真正跑起来的命令行 agent——有会话、有工具、有权限确认、有上下文压缩、有插件。它存在的目的不是"做一个能用的产品"，而是把原版 harness 的**架构形状**用最小体积复刻出来，让整套设计能被读完、读懂、改得动。
+> 一个能真正跑起来的 agent 内核：**插件串行挂载、事件瀑布、受保护的工具管道、LLM 适配缝**。
+> 1.03 万行 TypeScript，**运行时依赖为零**，660 例测试全绿。
 
-代码规模约 **1.03 万行**（不含测试），全部 TypeScript，运行时依赖为空。
+`mdsh` 是一个命令行 agent——有会话、有工具、有权限确认、有上下文压缩、有插件。它对照 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（约 46 万行 TS）做**架构级重写**：只保留四条灵魂，砍掉全部产品化工程，换来的是整套设计能被读完、读懂、改得动。
 
 ---
+
+## 30 秒看懂
+
+```mermaid
+flowchart TB
+    CLI["宿主 src/cli · REPL / 流式渲染 / 权限询问"]
+    BOOT["组合根 boot(config) · 按配置顺序串行挂载"]
+    KERNEL["插件内核 src/plugin · EventBus 通知+瀑布 · Ctx 组装"]
+    CLI --> BOOT --> KERNEL
+
+    subgraph SVCS["Ctx 服务面 —— 插件之间唯一的交互通道"]
+        direction LR
+        L["ctx.llm"]
+        S["ctx.sessions"]
+        T["ctx.tools"]
+        P["ctx.prompt"]
+        A["ctx.agent"]
+    end
+    KERNEL --> SVCS
+
+    L --> LLM["llm/ adapter seam"]
+    S --> SESS["session/ JSONL log + 投影"]
+    T --> TOOLS["tools/ 注册表 + guarded pipeline"]
+    P --> PROMPT["prompt/ section 拼装"]
+    A --> AGENT["agent/ turn·step loop"]
+
+    TOOLS --> PLUGINS["插件（内核之外，彼此不 import）<br/>memory · mcp"]
+```
+
+每个模块自己也是插件，经同一协议挂载——**内核不认识任何具体能力**，表里没有对应名字就 fail-fast。
+
+一个回合里数据是这么走的：
+
+```mermaid
+flowchart LR
+    U["用户输入"] --> A1["append user/message"]
+    A1 --> LOOP["agent 回合循环"]
+    LOOP --> PROJ["deriveMessages<br/>从 log 投影，唯一事实源"]
+    PROJ --> WF["llm/request 瀑布<br/>插件可改写请求"]
+    WF --> STREAM["adapter.stream<br/>SSE 流式"]
+    STREAM --> A2["append assistant/message"]
+    A2 --> CHK{"有工具调用?"}
+    CHK -- 无 --> FINISH["turn/end"]
+    CHK -- 有 --> PIPE["guarded pipeline<br/>权限门 → 执行 → 后处理"]
+    PIPE --> A3["append tool/result ×N"]
+    A3 --> LOOP
+```
+
+两条不变量贯穿全程：**模型可见的事实只来自 log**（进程内没有第二份对话状态），**错误各有归属**（工具失败是结果并已入 log，LLM 失败是异常上抛给宿主）。
+
+## 硬指标
+
+| 项 | 值 |
+|---|---|
+| 产品代码 | **10,319 行** TypeScript（不含测试） |
+| 运行时依赖 | **0**（SSE 解析、JSON Schema 校验、MCP 客户端全部手写） |
+| 测试 | **660 例**（单元测试 + 跨模块集成测试） |
+| 模块 | **10 个**（00 骨架 → 09 MCP 插件），一次一个、逐个交付 |
+| 设计文档 | **10 份**逐模块设计 + 1 份架构基线 |
+| 门禁 | typecheck / lint / test 三项全绿 |
+
+## 它保留了什么，砍掉了什么
+
+**保留**：插件串行挂载与依赖顺序、瀑布事件与通知、工具契约与执行流水线、JSONL 会话、上下文压缩、权限分层。
+
+**砍掉**：Cordis DI 与可逆 effects / 热替换、三域事件收敛为单一总线、会话多版本迁移链与 zstd、compaction 全家收敛为单一 summarize 策略、capability seams（工具直连本地实现）。
+
+记忆与 MCP 都是**插件**而非核心——与原版决策一致：记忆来自外部生态。
 
 ## 快速开始
 
@@ -22,6 +94,19 @@ node bin/mdsh.js            # 起 REPL
 想用 `mdsh` 直接调用：`pnpm link --global`（或把 `bin/mdsh.js` 加进 PATH）。
 
 **零配置即可启动**：不写任何配置文件时，内核会挂载五个内置插件，`model` 默认 `deepseek-chat` + `baseUrl` 默认 `https://api.deepseek.com` + 从环境变量 `DEEPSEEK_API_KEY` 取密钥。也就是说——设好环境变量就能对话。
+
+### Web 界面（蓝色大肥鱼主题）
+
+```bash
+pnpm build
+node bin/mdsh-web.js           # 打开 http://127.0.0.1:3080/
+```
+
+第二宿主形态：`plugins/web/` 是一个**普通插件**（灵魂 #1 的验证载体），核心不认识它。海洋蓝亮/暗双主题、上升气泡、游动鱼群、右下角鲸鱼娘女仆吉祥物（戳一戳摇摆出语录）、输入框上方滚动"每日鱼语"。流式输出逐字到达，工具调用有审批卡片（`ask` 策略的工具在浏览器里点按钮放行）。**只绑回环地址**，非回环拒绝启动；零运行时依赖，无 CDN 外链，完全离线。
+
+| 亮（晴海白昼） | 暗（深海夜） |
+|---|---|
+| ![light](docs/assets/bff-light.png) | ![dark](docs/assets/bff-dark.png) |
 
 ## 用法
 
@@ -148,6 +233,17 @@ LLM 能力本身也是插件——内核不认识任何 provider，表里没有 
 
 `/tools` 会标出 `exclusive`——表示该文件/进程类工具不可与其它工具并行（`write` / `edit` / `bash` 都是），其余走 `tools.maxParallel` 并发。
 
+## 设计文档
+
+这个项目是**文档先行**交付的：每个模块先写设计文档（Draft → review → Reviewed）才动代码，实现期间的偏离会回写进文档。这些文档是理解设计意图的第一手材料。
+
+| 文档 | 职责 |
+|---|---|
+| `docs/architecture.md` | 骨架基线：契约签名、模块依赖顺序、回合数据流（**改动需重新 review**） |
+| `docs/design/00-skeleton.md` … `09-plugin-mcp.md` | 逐模块设计，各含决策记录（D1…）与偏离记录（X / Y 两系） |
+| `docs/PROGRESS.md` | 跨会话交接的唯一事实源：实绩 LOC、遗留与阻塞、下一步动作 |
+| `docs/process.md` | 开发流程规范、模板与 DoD |
+
 ## 开发
 
 ```bash
@@ -167,12 +263,4 @@ docs/       architecture.md（基线）、process.md（流程）、design/NN-*.m
 bin/mdsh.js CLI 入口
 ```
 
-`docs/PROGRESS.md` 是**跨会话交接的唯一事实源**：下一步做什么、实绩 LOC、遗留与阻塞都在那里。新会话先读 `AGENT.md` → `PROGRESS.md` → 当前模块设计文档。
-
-## 它保留了什么，砍掉了什么
-
-**保留**：插件串行挂载与依赖顺序、瀑布事件与通知、工具契约与执行流水线、JSONL 会话、上下文压缩、权限分层。
-
-**砍掉**：Cordis DI 与可逆 effects / 热替换、三域事件收敛为单一总线、会话多版本迁移链与 zstd、compaction 全家收敛为单一 summarize 策略、capability seams（工具直连本地实现）。
-
-记忆与 MCP 都是**插件**而非核心——与原版决策一致：记忆来自外部生态。
+新会话接手开发时，读 `AGENT.md` → `docs/PROGRESS.md` → 当前模块设计文档。

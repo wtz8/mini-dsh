@@ -12,3 +12,16 @@ tests/integration/fixtures/
 # 编辑器
 .idea/
 .vscode/
+
+# 凭据与环境（密钥只走环境变量，任何 .env 形态都不入库）
+.env
+.env.*
+
+# 本地运行产物（会话日志默认在 ~/.minidsh/，仓库内出现也不入库）
+.minidsh/
+*.log
+
+# 操作系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini

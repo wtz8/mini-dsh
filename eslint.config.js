@@ -4,7 +4,8 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   // 产物与依赖目录不参与 lint
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**'] },
+  // mascot.ts 是 76KB 的 base64 资源（自动生成的立绘数据），ESLint 解析会栈溢出，且无规则可守
+  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'plugins/web/assets/mascot.ts'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
